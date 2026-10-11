@@ -46,7 +46,7 @@ jobs:
       - name: Upload bootable ISO
         uses: actions/upload-artifact@v4
         with:
-          name: npt-dos-build-002
-          path: build/npt-dos-build-002.iso
+          name: npt-dos-build-003
+          path: build/npt-dos-build-003.iso
           if-no-files-found: error
           retention-days: 14
