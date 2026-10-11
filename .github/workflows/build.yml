@@ -43,10 +43,15 @@ jobs:
           file build/npt-dos-build-007.iso
           ls -lh build/npt-dos-build-007.iso
 
+      - name: Generate ISO SHA-256 checksum
+        run: |
+          sha256sum build/npt-dos-build-007.iso > build/npt-dos-build-007.iso.sha256
+          cat build/npt-dos-build-007.iso.sha256
+
       - name: Upload bootable ISO
         uses: actions/upload-artifact@v4
         with:
           name: npt-dos-build-007
-          path: build/npt-dos-build-007.iso
-          if-no-files-found: error
-          retention-days: 14
+          path: |
+            build/npt-dos-build-007.iso
+            build/npt-dos-build-007.iso.sha256
