@@ -195,21 +195,20 @@ static void execute_command(char *line)
         terminal_writeline("There is no host prompt to return to.");
     } else if (string_equals_ignore_case(command, "DIR")) {
         command_dir();
-    } else if (string_equals_ignore_case(command, "FSINFO")) {
-        terminal_writeline("NPTFS RAM Filesystem");
-        terminal_write("File slots: ");
-        terminal_writeline("16");
-        terminal_write("Used slots: ");
-
-        {
-            int count = fs_file_count();
-            terminal_putchar((char)('0' + count));
+       } else if (string_equals_ignore_case(command, "FSINFO")) {
+        terminal_writeline("NPTFS Filesystem Information");
+        terminal_writeline("-----------------------------");
+        if (!fs_is_ready()) {
+            terminal_writeline("Status: Not ready");
+            terminal_writeline("Use FORMAT on the dedicated test disk.");
+        } else {
+            terminal_writeline("Status: Ready");
+            terminal_writeline("Storage: IDE hard disk");
+            terminal_writeline("Format: NPTFS v1");
+            terminal_writeline("Maximum files: 16");
+            terminal_writeline("Maximum filename: 15 characters");
+            terminal_writeline("Maximum file contents: 255 bytes");
         }
-
-        terminal_writeline("");
-        terminal_writeline("Maximum filename length: 15");
-        terminal_writeline("Maximum file size: 255 bytes");
-        terminal_writeline("Storage: volatile RAM");
     } else if (string_equals_ignore_case(command, "TOUCH")) {
         char *name = take_token(&arguments);
 
@@ -274,12 +273,19 @@ void kernel_main(void)
     keyboard_initialize();
     fs_initialize();
 
-    terminal_writeline("NPT-DOS Build 006");
-    terminal_writeline("Neptune Corporation");
-    terminal_writeline("--------------------------------");
-    terminal_writeline("NPTFS RAM filesystem initialized.");
-    terminal_writeline("Type HELP to list commands.");
-    terminal_writeline("");
+    terminal_writeline("NPT-DOS Build 007");
+terminal_writeline("Neptune Corporation");
+terminal_writeline("--------------------------------");
+
+if (fs_is_ready()) {
+    terminal_writeline("NPTFS persistent storage initialized.");
+} else {
+    terminal_writeline("NPTFS is not formatted or unavailable.");
+    terminal_writeline("Check the IDE disk, then use FORMAT.");
+}
+
+terminal_writeline("Type HELP to list commands.");
+terminal_writeline("");
 
     for (;;) {
         size_t length = 0;
