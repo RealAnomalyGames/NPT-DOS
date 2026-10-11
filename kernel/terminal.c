@@ -76,6 +76,7 @@ void terminal_clear(void)
 
     terminal_row = 0;
     terminal_column = 0;
+    terminal_update_cursor();
 }
 
 void terminal_initialize(void)
@@ -127,6 +128,7 @@ void terminal_putchar(char character)
     if (terminal_row >= VGA_HEIGHT) {
         terminal_scroll();
     }
+    terminal_update_cursor();
 }
 
 void terminal_write(const char *text)
@@ -154,4 +156,5 @@ void terminal_backspace(void)
     }
 
     terminal_put_entry_at(' ', terminal_column, terminal_row);
+    terminal_update_cursor();
 }
