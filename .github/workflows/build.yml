@@ -1,4 +1,4 @@
-name: NPT-DOS Build 002
+name: NPT-DOS Build 003
 
 on:
   push:
@@ -39,9 +39,9 @@ jobs:
 
       - name: Verify ISO exists
         run: |
-          test -s build/npt-dos-build-002.iso
-          file build/npt-dos-build-002.iso
-          ls -lh build/npt-dos-build-002.iso
+          test -s build/npt-dos-build-003.iso
+          file build/npt-dos-build-003.iso
+          ls -lh build/npt-dos-build-003.iso
 
       - name: Upload bootable ISO
         uses: actions/upload-artifact@v4
