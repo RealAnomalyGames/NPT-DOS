@@ -1,29 +1,20 @@
 #include <stddef.h>
+#include "fs.h"
 #include "keyboard.h"
 #include "terminal.h"
 
 #define INPUT_BUFFER_SIZE 128
 
-#define NPT_DOS_VERSION "NPT-DOS Build 005"
-
-/* Compare two strings without considering letter case. */
 static int string_equals_ignore_case(const char *a, const char *b)
 {
     while (*a != '\0' && *b != '\0') {
         char ca = *a;
         char cb = *b;
 
-        if (ca >= 'a' && ca <= 'z') {
-            ca = (char)(ca - 'a' + 'A');
-        }
+        if (ca >= 'a' && ca <= 'z') ca -= 'a' - 'A';
+        if (cb >= 'a' && cb <= 'z') cb -= 'a' - 'A';
 
-        if (cb >= 'a' && cb <= 'z') {
-            cb = (char)(cb - 'a' + 'A');
-        }
-
-        if (ca != cb) {
-            return 0;
-        }
+        if (ca != cb) return 0;
 
         a++;
         b++;
@@ -32,103 +23,229 @@ static int string_equals_ignore_case(const char *a, const char *b)
     return *a == '\0' && *b == '\0';
 }
 
-/* Print the available commands. */
 static void command_help(void)
 {
-    terminal_writeline("Available NPT-DOS commands:");
+    terminal_writeline("NPT-DOS Build 006 Commands");
+    terminal_writeline("--------------------------");
+    terminal_writeline("HELP              List commands");
+    terminal_writeline("VER               Display version");
+    terminal_writeline("CLS               Clear screen");
+    terminal_writeline("ECHO <text>       Display text");
+    terminal_writeline("INFO              System information");
+    terminal_writeline("EXIT              Display exit information");
+    terminal_writeline("DIR               List files");
+    terminal_writeline("TOUCH <name>      Create an empty file");
+    terminal_writeline("WRITE <name> <text>  Write or replace file text");
+    terminal_writeline("TYPE <name>       Display file contents");
+    terminal_writeline("DEL <name>        Delete a file");
+    terminal_writeline("FSINFO            Filesystem information");
     terminal_writeline("");
-    terminal_writeline("HELP         List available commands");
-    terminal_writeline("VER          Display the OS version");
-    terminal_writeline("CLS          Clear the terminal");
-    terminal_writeline("ECHO <text>  Display text");
-    terminal_writeline("INFO         Display system information");
-    terminal_writeline("EXIT         Display exit information");
+    terminal_writeline("Note: RAM files are lost on reboot.");
 }
 
-/* Display version information. */
 static void command_ver(void)
 {
-    terminal_writeline("NPT-DOS");
-    terminal_writeline("Version: Build 005");
-    terminal_writeline("Architecture: 32-bit x86");
-    terminal_writeline("Platform: PC-compatible");
-    terminal_writeline("Copyright (c) Neptune Corporation");
+    terminal_writeline("NPT-DOS Build 006");
+    terminal_writeline("32-bit x86 operating system");
+    terminal_writeline("Neptune Corporation");
 }
 
-/* Display basic OS information. */
 static void command_info(void)
 {
     terminal_writeline("NPT-DOS System Information");
     terminal_writeline("---------------------------");
-    terminal_writeline("Operating system: NPT-DOS");
     terminal_writeline("Architecture: 32-bit x86");
-    terminal_writeline("Interface: Text command line");
-    terminal_writeline("Terminal: VGA text mode");
+    terminal_writeline("Interface: VGA text terminal");
     terminal_writeline("Input: PS/2 keyboard");
     terminal_writeline("Bootloader: GRUB");
+    terminal_writeline("Filesystem: NPTFS RAM filesystem");
 }
 
-/* Execute a command and its optional arguments. */
-static void execute_command(char *line)
+static void command_dir(void)
 {
-    char *command;
-    char *arguments;
+    int count = fs_file_count();
+    int i;
 
-    /* Ignore leading spaces. */
-    while (*line == ' ' || *line == '\t') {
-        line++;
-    }
+    terminal_writeline("NPTFS Directory");
+    terminal_writeline("----------------");
 
-    /* Ignore empty commands. */
-    if (*line == '\0') {
-        return;
-    }
+    if (count == 0) {
+        terminal_writeline("No files found.");
+    } else {
+        for (i = 0; i < count; i++) {
+            const char *name = fs_filename_at(i);
 
-    command = line;
+            if (name != NULL) {
+                terminal_write(name);
+                terminal_write("  ");
 
-    /* Separate the command from its arguments. */
-    while (*line != '\0' && *line != ' ' && *line != '\t') {
-        line++;
-    }
+                {
+                    int size = fs_file_size(name);
+                    char digits[12];
+                    int n = 0;
 
-    if (*line != '\0') {
-        *line = '\0';
-        line++;
+                    if (size == 0) {
+                        terminal_write("0");
+                    } else {
+                        while (size > 0 && n < 11) {
+                            digits[n++] = (char)('0' + size % 10);
+                            size /= 10;
+                        }
 
-        while (*line == ' ' || *line == '\t') {
-            line++;
+                        while (n > 0) {
+                            terminal_putchar(digits[--n]);
+                        }
+                    }
+                }
+
+                terminal_writeline(" bytes");
+            }
         }
     }
 
-    arguments = line;
+    terminal_write("Files: ");
+    {
+        char digit = (char)('0' + count);
+        terminal_putchar(digit);
+    }
+    terminal_writeline("");
+}
+
+static void report_fs_result(fs_result_t result)
+{
+    switch (result) {
+        case FS_OK:
+            terminal_writeline("Operation completed.");
+            break;
+        case FS_NOT_FOUND:
+            terminal_writeline("Error: File not found.");
+            break;
+        case FS_ALREADY_EXISTS:
+            terminal_writeline("Error: File already exists.");
+            break;
+        case FS_FULL:
+            terminal_writeline("Error: Filesystem is full.");
+            break;
+        case FS_INVALID_NAME:
+            terminal_writeline("Error: Invalid filename.");
+            break;
+        case FS_TOO_LARGE:
+            terminal_writeline("Error: Text exceeds 255 characters.");
+            break;
+    }
+}
+
+static char *skip_spaces(char *text)
+{
+    while (*text == ' ' || *text == '\t') {
+        text++;
+    }
+
+    return text;
+}
+
+static char *take_token(char **text)
+{
+    char *token = skip_spaces(*text);
+    char *end = token;
+
+    while (*end != '\0' && *end != ' ' && *end != '\t') {
+        end++;
+    }
+
+    if (*end != '\0') {
+        *end = '\0';
+        *text = end + 1;
+    } else {
+        *text = end;
+    }
+
+    return token;
+}
+
+static void execute_command(char *line)
+{
+    char *arguments = skip_spaces(line);
+    char *command = take_token(&arguments);
+
+    arguments = skip_spaces(arguments);
+
+    if (*command == '\0') return;
 
     if (string_equals_ignore_case(command, "HELP")) {
         command_help();
-    }
-    else if (string_equals_ignore_case(command, "VER")) {
+    } else if (string_equals_ignore_case(command, "VER")) {
         command_ver();
-    }
-    else if (string_equals_ignore_case(command, "CLS")) {
+    } else if (string_equals_ignore_case(command, "CLS")) {
         terminal_clear();
-    }
-    else if (string_equals_ignore_case(command, "ECHO")) {
+    } else if (string_equals_ignore_case(command, "ECHO")) {
         terminal_writeline(arguments);
-    }
-    else if (string_equals_ignore_case(command, "INFO")) {
+    } else if (string_equals_ignore_case(command, "INFO")) {
         command_info();
-    }
-    else if (string_equals_ignore_case(command, "EXIT")) {
-        terminal_writeline(
-            "NPT-DOS runs directly on the machine."
-        );
-        terminal_writeline(
-            "There is no host command prompt to return to."
-        );
-    }
-    else {
+    } else if (string_equals_ignore_case(command, "EXIT")) {
+        terminal_writeline("NPT-DOS runs directly on this machine.");
+        terminal_writeline("There is no host prompt to return to.");
+    } else if (string_equals_ignore_case(command, "DIR")) {
+        command_dir();
+    } else if (string_equals_ignore_case(command, "FSINFO")) {
+        terminal_writeline("NPTFS RAM Filesystem");
+        terminal_write("File slots: ");
+        terminal_writeline("16");
+        terminal_write("Used slots: ");
+
+        {
+            int count = fs_file_count();
+            terminal_putchar((char)('0' + count));
+        }
+
+        terminal_writeline("");
+        terminal_writeline("Maximum filename length: 15");
+        terminal_writeline("Maximum file size: 255 bytes");
+        terminal_writeline("Storage: volatile RAM");
+    } else if (string_equals_ignore_case(command, "TOUCH")) {
+        char *name = take_token(&arguments);
+
+        if (*name == '\0') {
+            terminal_writeline("Usage: TOUCH <name>");
+        } else {
+            report_fs_result(fs_create(name));
+        }
+    } else if (string_equals_ignore_case(command, "WRITE")) {
+        char *name = take_token(&arguments);
+        char *text = skip_spaces(arguments);
+
+        if (*name == '\0' || *text == '\0') {
+            terminal_writeline("Usage: WRITE <name> <text>");
+        } else {
+            report_fs_result(fs_write(name, text));
+        }
+    } else if (string_equals_ignore_case(command, "TYPE")) {
+        char *name = take_token(&arguments);
+        const char *contents;
+
+        if (*name == '\0') {
+            terminal_writeline("Usage: TYPE <name>");
+        } else {
+            contents = fs_read(name);
+
+            if (contents == NULL) {
+                terminal_writeline("Error: File not found.");
+            } else {
+                terminal_writeline(contents);
+            }
+        }
+    } else if (string_equals_ignore_case(command, "DEL")) {
+        char *name = take_token(&arguments);
+
+        if (*name == '\0') {
+            terminal_writeline("Usage: DEL <name>");
+        } else {
+            report_fs_result(fs_delete(name));
+        }
+    } else {
         terminal_write("Unknown command: ");
         terminal_writeline(command);
-        terminal_writeline("Type HELP to see available commands.");
+        terminal_writeline("Type HELP for commands.");
     }
 }
 
@@ -138,12 +255,13 @@ void kernel_main(void)
 
     terminal_initialize();
     keyboard_initialize();
+    fs_initialize();
 
-    terminal_writeline("NPT-DOS Build 005");
+    terminal_writeline("NPT-DOS Build 006");
     terminal_writeline("Neptune Corporation");
     terminal_writeline("--------------------------------");
-    terminal_writeline("Command interpreter initialized.");
-    terminal_writeline("Type HELP to list available commands.");
+    terminal_writeline("NPTFS RAM filesystem initialized.");
+    terminal_writeline("Type HELP to list commands.");
     terminal_writeline("");
 
     for (;;) {
@@ -170,15 +288,13 @@ void kernel_main(void)
                 continue;
             }
 
-            if (c >= 32 && c <= 126) {
-                if (length < INPUT_BUFFER_SIZE - 1) {
-                    input[length++] = c;
-                    terminal_putchar(c);
-                }
+            if (c >= 32 && c <= 126 &&
+                length < INPUT_BUFFER_SIZE - 1) {
+                input[length++] = c;
+                terminal_putchar(c);
             }
         }
 
-        /* Separate command output from the next prompt. */
         terminal_writeline("");
     }
 }
