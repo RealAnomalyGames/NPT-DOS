@@ -2,6 +2,7 @@
 #include "fs.h"
 #include "keyboard.h"
 #include "terminal.h"
+#include "ata.h"
 
 #define INPUT_BUFFER_SIZE 128
 
@@ -25,22 +26,23 @@ static int string_equals_ignore_case(const char *a, const char *b)
 
 static void command_help(void)
 {
-    terminal_writeline("NPT-DOS Build 006 Commands");
+    terminal_writeline("NPT-DOS Build 007 Commands");
     terminal_writeline("--------------------------");
-    terminal_writeline("HELP              List commands");
-    terminal_writeline("VER               Display version");
-    terminal_writeline("CLS               Clear screen");
-    terminal_writeline("ECHO <text>       Display text");
-    terminal_writeline("INFO              System information");
-    terminal_writeline("EXIT              Display exit information");
-    terminal_writeline("DIR               List files");
-    terminal_writeline("TOUCH <name>      Create an empty file");
-    terminal_writeline("WRITE <name> <text>  Write or replace file text");
-    terminal_writeline("TYPE <name>       Display file contents");
-    terminal_writeline("DEL <name>        Delete a file");
-    terminal_writeline("FSINFO            Filesystem information");
+    terminal_writeline("HELP                 List commands");
+    terminal_writeline("VER                  Display version");
+    terminal_writeline("CLS                  Clear screen");
+    terminal_writeline("ECHO <text>          Display text");
+    terminal_writeline("INFO                 System information");
+    terminal_writeline("EXIT                 Display exit information");
+    terminal_writeline("DIR                  List files");
+    terminal_writeline("TOUCH <name>         Create an empty file");
+    terminal_writeline("WRITE <name> <text>  Write file contents");
+    terminal_writeline("TYPE <name>          Display file contents");
+    terminal_writeline("DEL <name>           Delete a file");
+    terminal_writeline("FSINFO               Filesystem information");
+    terminal_writeline("FORMAT               Format the NPTFS disk");
     terminal_writeline("");
-    terminal_writeline("Note: RAM files are lost on reboot.");
+    terminal_writeline("WARNING: FORMAT erases NPTFS data.");
 }
 
 static void command_ver(void)
@@ -131,6 +133,12 @@ static void report_fs_result(fs_result_t result)
             break;
         case FS_TOO_LARGE:
             terminal_writeline("Error: Text exceeds 255 characters.");
+            break;
+        case FS_NOT_READY:
+            terminal_writeline("Error: No formatted NPTFS disk is ready.");
+            break;
+        case FS_IO_ERROR:
+            terminal_writeline("Error: Disk read/write operation failed.");
             break;
     }
 }
@@ -241,6 +249,15 @@ static void execute_command(char *line)
             terminal_writeline("Usage: DEL <name>");
         } else {
             report_fs_result(fs_delete(name));
+        }
+    } else if (string_equals_ignore_case(command, "FORMAT")) {
+        terminal_writeline("WARNING: This formats the NPTFS disk.");
+        terminal_writeline("All existing NPTFS files will be erased.");
+
+        report_fs_result(fs_format());
+
+        if (fs_is_ready()) {
+            terminal_writeline("NPTFS is ready for use.");
         }
     } else {
         terminal_write("Unknown command: ");
