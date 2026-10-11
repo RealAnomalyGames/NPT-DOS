@@ -34,7 +34,7 @@ $(BUILD_DIR)/keyboard.o: kernel/keyboard.c kernel/keyboard.h | $(BUILD_DIR)
 $(BUILD_DIR)/fs.o: kernel/fs.c kernel/fs.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(KERNEL): $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/terminal.o $(BUILD_DIR)/keyboard.o linker.ld
+$(KERNEL): $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/terminal.o $(BUILD_DIR)/keyboard.o $(BUILD_DIR)/fs.o linker.ld
 	$(LD) $(LDFLAGS) -o $@ \
 		$(BUILD_DIR)/boot.o \
 		$(BUILD_DIR)/kernel.o \
