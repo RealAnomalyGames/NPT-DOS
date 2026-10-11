@@ -250,13 +250,15 @@ static void execute_command(char *line)
             report_fs_result(fs_delete(name));
         }
     } else if (string_equals_ignore_case(command, "FORMAT")) {
-        terminal_writeline("WARNING: This formats the NPTFS disk.");
-        terminal_writeline("All existing NPTFS files will be erased.");
+        terminal_writeline("Starting NPTFS format...");
 
-        report_fs_result(fs_format());
+        fs_result_t result = fs_format();
+        report_fs_result(result);
 
         if (fs_is_ready()) {
-            terminal_writeline("NPTFS is ready for use.");
+            terminal_writeline("NPTFS format completed.");
+        } else {
+            terminal_writeline("NPTFS remains unavailable.");
         }
     } else {
         terminal_write("Unknown command: ");
