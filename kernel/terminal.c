@@ -119,3 +119,17 @@ void terminal_writeline(const char *text)
     terminal_write(text);
     terminal_putchar('\n');
 }
+
+void terminal_backspace(void)
+{
+    if (terminal_column > 0) {
+        terminal_column--;
+    } else if (terminal_row > 0) {
+        terminal_row--;
+        terminal_column = VGA_WIDTH - 1;
+    } else {
+        return;
+    }
+
+    terminal_put_entry_at(' ', terminal_column, terminal_row);
+}
