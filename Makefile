@@ -19,7 +19,7 @@ all: $(ISO)
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
-$(BUILD_DIR)/boot.o: boot/boot.S | $(BUILD_DIR)
+$(BUILD_DIR)/boot.o: boot/boot.s | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/kernel.o: kernel/kernel.c | $(BUILD_DIR)
