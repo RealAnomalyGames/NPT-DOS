@@ -9,6 +9,28 @@
 
 #define TERMINAL_COLOR 0x07
 
+static inline void terminal_outb(unsigned short port, unsigned char value)
+{
+    __asm__ volatile (
+        "outb %0, %1"
+        :
+        : "a"(value), "Nd"(port)
+    );
+}
+
+static void terminal_update_cursor(void)
+{
+    unsigned short position =
+        (unsigned short)(terminal_row * VGA_WIDTH + terminal_column);
+
+    terminal_outb(0x3D4, 0x0F);
+    terminal_outb(0x3D5, (unsigned char)(position & 0xFF));
+
+    terminal_outb(0x3D4, 0x0E);
+    terminal_outb(0x3D5, (unsigned char)((position >> 8) & 0xFF));
+}
+
+
 static size_t terminal_row;
 static size_t terminal_column;
 
