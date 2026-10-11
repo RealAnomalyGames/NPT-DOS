@@ -11,10 +11,14 @@ typedef enum {
     FS_ALREADY_EXISTS,
     FS_FULL,
     FS_INVALID_NAME,
-    FS_TOO_LARGE
+    FS_TOO_LARGE,
+    FS_NOT_READY,
+    FS_IO_ERROR
 } fs_result_t;
 
 void fs_initialize(void);
+int fs_is_ready(void);
+fs_result_t fs_format(void);
 
 fs_result_t fs_create(const char *name);
 fs_result_t fs_write(const char *name, const char *text);
