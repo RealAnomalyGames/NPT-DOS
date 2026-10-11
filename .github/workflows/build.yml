@@ -1,4 +1,4 @@
-name: NPT-DOS Build 006
+name: NPT-DOS Build 007
 
 on:
   push:
@@ -39,14 +39,14 @@ jobs:
 
       - name: Verify ISO exists
         run: |
-          test -s build/npt-dos-build-006.iso
-          file build/npt-dos-build-006.iso
-          ls -lh build/npt-dos-build-006.iso
+          test -s build/npt-dos-build-007.iso
+          file build/npt-dos-build-007.iso
+          ls -lh build/npt-dos-build-007.iso
 
       - name: Upload bootable ISO
         uses: actions/upload-artifact@v4
         with:
-          name: npt-dos-build-006
-          path: build/npt-dos-build-006.iso
+          name: npt-dos-build-007
+          path: build/npt-dos-build-007.iso
           if-no-files-found: error
           retention-days: 14
