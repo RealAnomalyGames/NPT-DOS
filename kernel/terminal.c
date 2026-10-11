@@ -1,21 +1,21 @@
+
 #include <stddef.h>
 #include <stdint.h>
-
 #include "terminal.h"
 
-#define VGA_WIDTH  80
+#define VGA_WIDTH 80
 #define VGA_HEIGHT 25
-#define VGA_MEMORY ((volatile uint16_t *)0xB8000)
-
 #define TERMINAL_COLOR 0x07
 
+#define VGA_MEMORY ((volatile uint16_t *)0xB8000)
+
+static size_t terminal_row;
+static size_t terminal_column;
+
+/* Hardware cursor support */
 static inline void terminal_outb(unsigned short port, unsigned char value)
 {
-    __asm__ volatile (
-        "outb %0, %1"
-        :
-        : "a"(value), "Nd"(port)
-    );
+    __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
 }
 
 static void terminal_update_cursor(void)
@@ -25,11 +25,9 @@ static void terminal_update_cursor(void)
 
     terminal_outb(0x3D4, 0x0F);
     terminal_outb(0x3D5, (unsigned char)(position & 0xFF));
-
     terminal_outb(0x3D4, 0x0E);
     terminal_outb(0x3D5, (unsigned char)((position >> 8) & 0xFF));
 }
-
 
 static size_t terminal_row;
 static size_t terminal_column;
