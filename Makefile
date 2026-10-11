@@ -1,7 +1,7 @@
 BUILD_DIR := build
 ISO_DIR := $(BUILD_DIR)/iso
 KERNEL := $(BUILD_DIR)/kernel.elf
-ISO := $(BUILD_DIR)/npt-dos-build-005.iso
+ISO := $(BUILD_DIR)/npt-dos-build-006.iso
 
 CC := gcc
 LD := ld
@@ -31,12 +31,16 @@ $(BUILD_DIR)/terminal.o: kernel/terminal.c kernel/terminal.h | $(BUILD_DIR)
 $(BUILD_DIR)/keyboard.o: kernel/keyboard.c kernel/keyboard.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BUILD_DIR)/fs.o: kernel/fs.c kernel/fs.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
 $(KERNEL): $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/terminal.o $(BUILD_DIR)/keyboard.o linker.ld
 	$(LD) $(LDFLAGS) -o $@ \
 		$(BUILD_DIR)/boot.o \
 		$(BUILD_DIR)/kernel.o \
 		$(BUILD_DIR)/terminal.o \
-		$(BUILD_DIR)/keyboard.o
+		$(BUILD_DIR)/keyboard.o \
+		$(BUILD_DIR)/fs.o
 
 check: $(KERNEL)
 	grub-file --is-x86-multiboot $(KERNEL)
