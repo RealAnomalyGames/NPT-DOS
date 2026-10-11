@@ -36,5 +36,5 @@ jobs:
         run: |
           gcc --version
           make --version
-          grub-file --version
+          grub-file --help
           xorriso -version
