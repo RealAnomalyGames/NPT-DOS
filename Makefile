@@ -1,7 +1,8 @@
+
 BUILD_DIR := build
 ISO_DIR := $(BUILD_DIR)/iso
 KERNEL := $(BUILD_DIR)/kernel.elf
-ISO := $(BUILD_DIR)/npt-dos-build-002.iso
+ISO := $(BUILD_DIR)/npt-dos-build-003.iso
 
 CC := gcc
 LD := ld
@@ -22,11 +23,17 @@ $(BUILD_DIR):
 $(BUILD_DIR)/boot.o: boot/boot.s | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel.o: kernel/kernel.c | $(BUILD_DIR)
+$(BUILD_DIR)/kernel.o: kernel/kernel.c kernel/terminal.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(KERNEL): $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o linker.ld
-	$(LD) $(LDFLAGS) -o $@ $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o
+$(BUILD_DIR)/terminal.o: kernel/terminal.c kernel/terminal.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(KERNEL): $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/terminal.o linker.ld
+	$(LD) $(LDFLAGS) -o $@ \
+		$(BUILD_DIR)/boot.o \
+		$(BUILD_DIR)/kernel.o \
+		$(BUILD_DIR)/terminal.o
 
 check: $(KERNEL)
 	grub-file --is-x86-multiboot $(KERNEL)
