@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "keyboard.h"
+#include "timer.h"
 
 #define KEYBOARD_DATA_PORT   0x60
 #define KEYBOARD_STATUS_PORT 0x64
@@ -104,6 +105,8 @@ void keyboard_initialize(void)
 char keyboard_getchar(void)
 {
     for (;;) {
+        timer_poll();
+
         if (!(inb(KEYBOARD_STATUS_PORT) & 0x01)) {
             continue;
         }
