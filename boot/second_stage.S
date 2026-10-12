@@ -53,6 +53,10 @@ load_kernel:
     decb sectors_remaining
     jnz load_kernel
 
+    /* QEMU diagnostic: kernel sectors loaded successfully. */
+    movb $'2', %al
+    outb %al, $0xE9
+
     /*
      * Enable A20 using the fast A20 gate.
      */
@@ -156,6 +160,10 @@ protected_mode_entry:
     /* Transfer control to the kernel entry point. */
     movl $0x100000, %eax
     jmp *%eax
+
+    /* QEMU diagnostic: protected-mode entry reached. */
+    movb $'3', %al
+    outb %al, $0xE9
 
 stage2_halt:
     cli
