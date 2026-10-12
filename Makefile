@@ -22,7 +22,7 @@ $(BUILD_DIR):
 $(BUILD_DIR)/boot.o: boot/boot.S | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/kernel.o: kernel/kernel.c kernel/keyboard.h kernel/terminal.h kernel/fs.h kernel/ata.h kernel/timer.h kernel/rtc.h | $(BUILD_DIR)
+$(BUILD_DIR)/kernel.o: kernel/kernel.c kernel/keyboard.h kernel/terminal.h kernel/fs.h kernel/ata.h kernel/timer.h kernel/rtc.h kernel/setup.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/terminal.o: kernel/terminal.c kernel/terminal.h | $(BUILD_DIR)
@@ -43,7 +43,10 @@ $(BUILD_DIR)/timer.o: kernel/timer.c kernel/timer.h | $(BUILD_DIR)
 $(BUILD_DIR)/rtc.o: kernel/rtc.c kernel/rtc.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(KERNEL): $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/terminal.o $(BUILD_DIR)/keyboard.o $(BUILD_DIR)/fs.o $(BUILD_DIR)/ata.o $(BUILD_DIR)/timer.o $(BUILD_DIR)/rtc.o linker.ld
+$(BUILD_DIR)/setup.o: kernel/setup.c kernel/setup.h kernel/keyboard.h kernel/terminal.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(KERNEL): $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/terminal.o $(BUILD_DIR)/keyboard.o $(BUILD_DIR)/fs.o $(BUILD_DIR)/ata.o $(BUILD_DIR)/timer.o $(BUILD_DIR)/rtc.o $(BUILD_DIR)/setup.o linker.ld
 	$(LD) $(LDFLAGS) -o $@ \
 		$(BUILD_DIR)/boot.o \
 		$(BUILD_DIR)/kernel.o \
@@ -52,7 +55,8 @@ $(KERNEL): $(BUILD_DIR)/boot.o $(BUILD_DIR)/kernel.o $(BUILD_DIR)/terminal.o $(B
 		$(BUILD_DIR)/fs.o \
 		$(BUILD_DIR)/ata.o \
 		$(BUILD_DIR)/timer.o \
-		$(BUILD_DIR)/rtc.o
+		$(BUILD_DIR)/rtc.o \
+		$(BUILD_DIR)/setup.o
 
 check: $(KERNEL)
 	grub-file --is-x86-multiboot $(KERNEL)
