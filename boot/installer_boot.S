@@ -28,6 +28,10 @@ _start:
 normalized:
     cld
 
+    /* QEMU diagnostic: first-stage boot sector is running. */
+    movb $'1', %al
+    outb %al, $0xE9
+
     /* Preserve the BIOS-provided drive number at physical 0x0500. */
     movb %dl, 0x0500
 
