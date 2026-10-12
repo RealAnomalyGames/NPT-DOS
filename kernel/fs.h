@@ -30,6 +30,7 @@ fs_result_t fs_create(const char *name);
 fs_result_t fs_write(const char *name, const char *text);
 const char *fs_read(const char *name);
 fs_result_t fs_delete(const char *name);
+fs_result_t fs_rename(const char *old_name, const char *new_name);
 
 int fs_file_count(void);
 const char *fs_filename_at(int index);
