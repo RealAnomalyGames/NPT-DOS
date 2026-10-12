@@ -35,7 +35,6 @@ INSTALLER_ASSETS_OBJ := $(BUILD_DIR)/installer_assets.o
 
 COMMON_OBJECTS := \
 	$(BUILD_DIR)/boot.o \
-	$(BUILD_DIR)/kernel.o \
 	$(BUILD_DIR)/terminal.o \
 	$(BUILD_DIR)/keyboard.o \
 	$(BUILD_DIR)/fs.o \
@@ -45,10 +44,12 @@ COMMON_OBJECTS := \
 
 BASE_OBJECTS := \
 	$(COMMON_OBJECTS) \
+	$(BUILD_DIR)/kernel-installed.o \
 	$(BUILD_DIR)/setup.o
 
 INSTALLER_OBJECTS := \
 	$(COMMON_OBJECTS) \
+	$(BUILD_DIR)/kernel.o \
 	$(BUILD_DIR)/setup_installer.o \
 	$(INSTALLER_ASSETS_OBJ)
 
@@ -71,6 +72,12 @@ $(BUILD_DIR)/kernel.o: kernel/kernel.c \
 	kernel/ata.h kernel/timer.h kernel/rtc.h kernel/setup.h \
 	| $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/kernel-installed.o: kernel/kernel.c \
+	kernel/keyboard.h kernel/terminal.h kernel/fs.h \
+	kernel/ata.h kernel/timer.h kernel/rtc.h kernel/setup.h \
+	| $(BUILD_DIR)
+	$(CC) $(CFLAGS) -DNPT_INSTALLED_BUILD -c $< -o $@
 
 $(BUILD_DIR)/terminal.o: kernel/terminal.c kernel/terminal.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
