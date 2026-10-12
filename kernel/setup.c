@@ -76,6 +76,76 @@ static int setup_has_nptfs_signature(const uint8_t *sector)
     return 1;
 }
 
+/*
+ * Read-only installer safety inspection.
+ *
+ * The proposed installer would overwrite:
+ *   LBA 0
+ *   LBA 32-47
+ *   LBA 64-319
+ *
+ * Return values:
+ *   1  All planned overwrite sectors were readable and zero.
+ *   0  At least one planned overwrite sector contained data.
+ *  -1  Capacity or sector read was unavailable.
+ */
+static int setup_sector_is_zero(const uint8_t *sector)
+{
+    unsigned int i;
+
+    for (i = 0; i < ATA_SECTOR_SIZE; i++) {
+        if (sector[i] != 0U) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int setup_check_planned_write_sectors(uint32_t sectors)
+{
+    uint8_t sector[ATA_SECTOR_SIZE];
+    uint32_t lba;
+
+    /* The highest planned sector is LBA 319. */
+    if (sectors < 320U) {
+        return -1;
+    }
+
+    /* The boot sector would be overwritten. */
+    if (!ata_read_sector(0U, sector)) {
+        return -1;
+    }
+
+    if (!setup_sector_is_zero(sector)) {
+        return 0;
+    }
+
+    /* The second-stage loader occupies LBAs 32 through 47. */
+    for (lba = 32U; lba <= 47U; lba++) {
+        if (!ata_read_sector(lba, sector)) {
+            return -1;
+        }
+
+        if (!setup_sector_is_zero(sector)) {
+            return 0;
+        }
+    }
+
+    /* The padded installed kernel occupies LBAs 64 through 319. */
+    for (lba = 64U; lba <= 319U; lba++) {
+        if (!ata_read_sector(lba, sector)) {
+            return -1;
+        }
+
+        if (!setup_sector_is_zero(sector)) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static void setup_inspect_selected_disk(
     const ata_device_info_t *info
 )
@@ -85,12 +155,14 @@ static void setup_inspect_selected_disk(
     uint32_t mib_whole;
     uint32_t mib_fraction;
     int read_ok;
+    int overwrite_check;
 
     terminal_clear();
     terminal_writeline("NPT-DOS SETUP: TARGET INSPECTION");
     terminal_writeline("--------------------------------");
     terminal_writeline("");
     terminal_writeline("Selected target: Primary Master");
+
     terminal_write("Model: ");
     terminal_writeline(
         info->model[0] != '\0' ? info->model : "(not reported)"
@@ -101,8 +173,8 @@ static void setup_inspect_selected_disk(
 
     if (sectors == 0U) {
         terminal_writeline("Capacity: Unknown");
-        terminal_writeline("SAFETY STOP: Capacity is unavailable.");
-        terminal_writeline("This target cannot be approved.");
+        terminal_writeline("SAFETY STOP: Capacity unavailable.");
+        terminal_writeline("Target inspection cannot continue.");
         terminal_writeline("");
         terminal_writeline("No disk writes were performed.");
         terminal_writeline("Press any key to return.");
@@ -111,6 +183,7 @@ static void setup_inspect_selected_disk(
     }
 
     terminal_write("Reported LBA28 sectors: ");
+
     if (info->lba28_sectors == 0U) {
         terminal_writeline("Not reported");
     } else {
@@ -137,25 +210,39 @@ static void setup_inspect_selected_disk(
     );
 
     if (!read_ok) {
-        terminal_writeline("NPTFS status: Unable to read sector 1.");
-        terminal_writeline("SAFETY STOP: Target inspection failed.");
-        terminal_writeline("Do not attempt installation.");
+        terminal_writeline("NPTFS status: Cannot read sector 1.");
+        terminal_writeline("SAFETY STOP: Read failure.");
     } else if (setup_has_nptfs_signature(sector)) {
         terminal_writeline("NPTFS status: Signature detected.");
-        terminal_writeline("WARNING: This disk may contain NPTFS data.");
-        terminal_writeline("Do not format or overwrite this disk.");
+        terminal_writeline("Existing NPTFS data may be present.");
+        terminal_writeline("The filesystem will not be formatted.");
     } else {
         terminal_writeline("NPTFS status: Signature not detected.");
-        terminal_writeline("This does NOT prove the disk is empty.");
-        terminal_writeline("Other filesystems or data may exist.");
+        terminal_writeline("This does not prove the disk is empty.");
     }
 
     terminal_writeline("");
-    terminal_writeline("INSTALLATION: DISABLED IN BUILD 014-D");
-    terminal_writeline("This screen performs inspection only.");
+    terminal_writeline("Checking planned overwrite sectors...");
+
+    overwrite_check = setup_check_planned_write_sectors(sectors);
+
+    if (overwrite_check == 1) {
+        terminal_writeline("Reserved sectors: All zero.");
+        terminal_writeline("This is not proof the disk is empty.");
+    } else if (overwrite_check == 0) {
+        terminal_writeline("Reserved sectors: DATA DETECTED.");
+        terminal_writeline("SAFETY STOP: Do not install here.");
+    } else {
+        terminal_writeline("Reserved sectors: CHECK FAILED.");
+        terminal_writeline("SAFETY STOP: Cannot approve target.");
+    }
+
+    terminal_writeline("");
+    terminal_writeline("INSTALLATION: DISABLED");
+    terminal_writeline("This is a read-only inspection.");
     terminal_writeline("No disk writes were performed.");
     terminal_writeline("");
-    terminal_writeline("Press any key to return to target selection.");
+    terminal_writeline("Press any key to return.");
 
     setup_wait_for_key();
 }
