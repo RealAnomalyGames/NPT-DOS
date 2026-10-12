@@ -182,7 +182,7 @@ static void command_help(char *arguments)
     arguments = skip_spaces(arguments);
 
     if (*topic == '\0') {
-        terminal_writeline("NPT-DOS Build 012 Commands");
+        terminal_writeline("NPT-DOS Build 014 Commands");
         terminal_writeline("--------------------------");
         terminal_writeline("HELP [command]          List commands or show command help");
         terminal_writeline("VER                     Display version");
@@ -351,7 +351,7 @@ static void command_help(char *arguments)
 
 static void command_ver(void)
 {
-    terminal_writeline("NPT-DOS Build 012");
+    terminal_writeline("NPT-DOS Build 014");
     terminal_writeline("32-bit x86 operating system");
     terminal_writeline("Neptune Corporation");
 }
@@ -1122,7 +1122,7 @@ static void command_sysinfo(void)
     terminal_writeline("NPT-DOS System Information");
     terminal_writeline("--------------------------");
     terminal_writeline("Operating system: NPT-DOS");
-    terminal_writeline("Build: 012");
+    terminal_writeline("Build: 014");
     terminal_writeline("Publisher: Neptune Corporation");
     terminal_writeline("Architecture: 32-bit x86");
     terminal_writeline("Bootloader: GRUB / Multiboot");
@@ -1397,7 +1397,7 @@ void kernel_main(void)
 
     fs_initialize();
 
-    terminal_writeline("NPT-DOS Build 013");
+    terminal_writeline("NPT-DOS Build 014");
     terminal_writeline("Neptune Corporation");
     terminal_writeline("--------------------------------");
 
