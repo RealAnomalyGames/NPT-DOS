@@ -39,6 +39,10 @@ _start:
     xorl %eax, %eax
     rep stosb
 
+    /* QEMU diagnostic: kernel startup and BSS clear completed. */
+    movb $'K', %al
+    outb %al, $0xE9
+
     /* Initialize the kernel stack after clearing BSS. */
     movl $stack_top, %esp
     xorl %ebp, %ebp
