@@ -32,7 +32,8 @@ jobs:
             mtools \
             nasm \
             binutils \
-            file
+            file \
+            qemu-system-x86
 
       - name: Build ISO and installer assets
         run: make
@@ -83,6 +84,71 @@ jobs:
           nm build/kernel.elf | grep -q 'installer_kernel_end'
 
           echo "All expected installer asset symbols are present."
+
+      - name: Verify installer layout and embedded assets
+        run: python3 scripts/verify_installer.py
+
+      - name: Create disposable BIOS boot-test disk
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          truncate -s 16M build/installer-smoke.img
+
+          dd if=build/installer_boot.bin \
+            of=build/installer-smoke.img \
+            bs=512 seek=0 conv=notrunc status=none
+
+          dd if=build/second_stage.bin \
+            of=build/installer-smoke.img \
+            bs=512 seek=32 conv=notrunc status=none
+
+          dd if=build/installed_kernel.bin \
+            of=build/installer-smoke.img \
+            bs=512 seek=64 conv=notrunc status=none
+
+          echo "Created a disposable 16 MiB boot-test disk."
+          echo "No physical disk or user data is accessed."
+
+      - name: Boot-test BIOS chain with QEMU
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -f build/boot-chain.log
+
+          set +e
+          timeout 10s qemu-system-i386 \
+            -machine pc \
+            -accel tcg \
+            -m 64M \
+            -drive file=build/installer-smoke.img,format=raw,if=ide \
+            -boot order=c \
+            -display none \
+            -serial none \
+            -monitor none \
+            -no-reboot \
+            -no-shutdown \
+            -debugcon file:build/boot-chain.log \
+            -global isa-debugcon.iobase=0xe9
+          qemu_status=$?
+          set -e
+
+          if [ "$qemu_status" -ne 124 ] && [ "$qemu_status" -ne 0 ]; then
+            echo "QEMU exited unexpectedly: $qemu_status"
+            cat build/boot-chain.log || true
+            exit 1
+          fi
+
+          echo "QEMU diagnostic output:"
+          cat build/boot-chain.log
+
+          if ! grep -q '123K' build/boot-chain.log; then
+            echo "ERROR: The complete BIOS-to-kernel boot chain was not verified."
+            exit 1
+          fi
+
+          echo "PASS: BIOS boot sector, second stage, protected mode, and kernel entry verified."
 
       - name: Verify bootable ISO exists
         shell: bash
