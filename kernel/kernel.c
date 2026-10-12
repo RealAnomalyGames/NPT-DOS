@@ -329,7 +329,6 @@ static void command_free(void)
 {
     int used;
     int free_slots;
-    int i;
     int raw_free_bytes;
     int content_free_bytes;
 
@@ -342,11 +341,6 @@ static void command_free(void)
     free_slots = FS_MAX_FILES - used;
     raw_free_bytes = free_slots * 512;
     content_free_bytes = free_slots * FS_CONTENT_MAX;
-
-    /* Confirm filesystem layout before reporting available sectors. */
-    for (i = 0; i < FS_MAX_FILES; i++) {
-        (void)i;
-    }
 
     terminal_writeline("NPTFS Free Space");
     terminal_writeline("-----------------");
