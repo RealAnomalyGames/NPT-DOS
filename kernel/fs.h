@@ -1,9 +1,9 @@
 #ifndef NPT_DOS_FS_H
 #define NPT_DOS_FS_H
 
-#define FS_MAX_FILES 16
+#define FS_MAX_FILES 32
 #define FS_NAME_MAX 15
-#define FS_CONTENT_MAX 255
+#define FS_CONTENT_MAX 512
 
 #define FS_ATTR_READ_ONLY 0x01
 #define FS_ATTR_HIDDEN    0x02
