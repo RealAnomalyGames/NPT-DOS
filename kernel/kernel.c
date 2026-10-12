@@ -182,7 +182,7 @@ static void command_help(char *arguments)
     arguments = skip_spaces(arguments);
 
     if (*topic == '\0') {
-        terminal_writeline("NPT-DOS Build 014 Commands");
+        terminal_writeline("   NPT-DOS 1.0 Commands   ");
         terminal_writeline("--------------------------");
         terminal_writeline("HELP [command]          List commands or show command help");
         terminal_writeline("VER                     Display version");
@@ -255,7 +255,7 @@ static void command_help(char *arguments)
         terminal_writeline("Waits until a key is pressed.");
     } else if (string_equals_ignore_case(topic, "VER")) {
         terminal_writeline("VER");
-        terminal_writeline("Displays the NPT-DOS build and publisher.");
+        terminal_writeline("Displays the NPT-DOS version and publisher.");
     } else if (string_equals_ignore_case(topic, "CLS")) {
         terminal_writeline("CLS");
         terminal_writeline("Clears the terminal screen.");
@@ -351,7 +351,7 @@ static void command_help(char *arguments)
 
 static void command_ver(void)
 {
-    terminal_writeline("NPT-DOS Build 014");
+    terminal_writeline("NPT-DOS 1.0");
     terminal_writeline("32-bit x86 operating system");
     terminal_writeline("Neptune Corporation");
 }
@@ -1122,7 +1122,7 @@ static void command_sysinfo(void)
     terminal_writeline("NPT-DOS System Information");
     terminal_writeline("--------------------------");
     terminal_writeline("Operating system: NPT-DOS");
-    terminal_writeline("Build: 014");
+    terminal_writeline("Version: 1.0");
     terminal_writeline("Publisher: Neptune Corporation");
     terminal_writeline("Architecture: 32-bit x86");
     terminal_writeline("Bootloader: GRUB / Multiboot");
@@ -1399,7 +1399,7 @@ void kernel_main(void)
 
     fs_initialize();
 
-    terminal_writeline("NPT-DOS Build 014");
+    terminal_writeline("NPT-DOS 1.0");
     terminal_writeline("Neptune Corporation");
     terminal_writeline("--------------------------------");
 
