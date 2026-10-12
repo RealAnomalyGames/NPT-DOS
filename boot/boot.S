@@ -1,3 +1,4 @@
+
 .section .multiboot
 .align 4
 
@@ -20,11 +21,28 @@ stack_top:
 .type _start, @function
 
 .extern kernel_main
+.extern __bss_start
+.extern __bss_end
 
 _start:
     cli
-    mov $stack_top, %esp
-    xor %ebp, %ebp
+    cld
+
+    /*
+     * Clear BSS before using the stack.
+     * This is required when booting the installed
+     * kernel directly, without GRUB.
+     */
+    movl $__bss_start, %edi
+    movl $__bss_end, %ecx
+    subl %edi, %ecx
+    xorl %eax, %eax
+    rep stosb
+
+    /* Initialize the kernel stack after clearing BSS. */
+    movl $stack_top, %esp
+    xorl %ebp, %ebp
+
     call kernel_main
 
 halt_loop:
