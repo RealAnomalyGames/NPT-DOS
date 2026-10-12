@@ -450,7 +450,7 @@ static void command_prompt(char *arguments)
         shell_prompt[i] = arguments[i];
     }
 
-    shell_prompt[length] = 'f\0';
+    shell_prompt[length] = '\0';
 
     terminal_write("Prompt changed to: ");
     terminal_write(shell_prompt);
