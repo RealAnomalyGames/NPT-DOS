@@ -11,7 +11,6 @@
 #define ATA_STATUS     0x1F7
 #define ATA_COMMAND    0x1F7
 #define ATA_ALTSTATUS  0x3F6
-#define ATA_CONTROL    0x3F6
 
 #define ATA_CMD_READ     0x20
 #define ATA_CMD_WRITE    0x30
@@ -25,8 +24,10 @@
 
 #define ATA_TIMEOUT    1000000U
 #define ATA_MAX_LBA    0x0FFFFFFFU
+#define ATA_MAX_SECTORS 0x10000000U
 
 static int ata_ready = 0;
+static ata_device_info_t ata_info;
 
 static inline void outb(uint16_t port, uint8_t value)
 {
@@ -116,18 +117,71 @@ static int ata_wait_complete(void)
     return 0;
 }
 
+/*
+ * Decode ATA IDENTIFY words 27-46.
+ * ATA stores two model characters per word, with the high byte first
+ * in the logical model string.
+ */
+static void ata_decode_model(const uint16_t *identify)
+{
+    uint32_t i;
+    uint32_t length = 40;
+
+    for (i = 0; i < 20; i++) {
+        uint16_t word = identify[27 + i];
+
+        ata_info.model[i * 2] = (char)(word >> 8);
+        ata_info.model[i * 2 + 1] = (char)(word & 0xFF);
+    }
+
+    ata_info.model[40] = '\0';
+
+    /* Remove trailing spaces from the fixed-width model field. */
+    while (length > 0 && ata_info.model[length - 1] == ' ') {
+        length--;
+    }
+
+    ata_info.model[length] = '\0';
+}
+
+/* Cache the IDENTIFY information needed by NPT-DOS. */
+static void ata_decode_identify(const uint16_t *identify)
+{
+    uint32_t sectors;
+
+    ata_decode_model(identify);
+
+    sectors = (uint32_t)identify[60]
+            | ((uint32_t)identify[61] << 16);
+
+    ata_info.lba28_sectors = sectors;
+
+    if (sectors > ATA_MAX_SECTORS) {
+        sectors = ATA_MAX_SECTORS;
+    }
+
+    ata_info.addressable_sectors = sectors;
+    ata_info.detected = 1;
+}
+
+/*
+ * Initialize the primary-master ATA device and cache its IDENTIFY data.
+ * This function reads device information but does not write disk sectors.
+ */
 int ata_initialize(void)
 {
     uint32_t timeout;
     uint8_t status;
     uint32_t i;
+    uint16_t identify[256];
 
     ata_ready = 0;
+    ata_info.detected = 0;
+    ata_info.model[0] = '\0';
+    ata_info.lba28_sectors = 0;
+    ata_info.addressable_sectors = 0;
 
-    /*
-     * Select the primary-master device BEFORE checking its status.
-     * 0xA0 selects the master for the IDENTIFY command.
-     */
+    /* Select the primary master for IDENTIFY. */
     outb(ATA_DRIVE, 0xA0);
     ata_delay_400ns();
 
@@ -154,7 +208,7 @@ int ata_initialize(void)
         return 0;
     }
 
-    /* IDENTIFY requires the sector-count and LBA registers to be zero. */
+    /* IDENTIFY requires these registers to be zero. */
     outb(ATA_SECCOUNT, 0);
     outb(ATA_LBA0, 0);
     outb(ATA_LBA1, 0);
@@ -199,9 +253,9 @@ int ata_initialize(void)
         return 0;
     }
 
-    /* Consume the 512-byte IDENTIFY response (256 words). */
+    /* Save all 256 words from the 512-byte IDENTIFY response. */
     for (i = 0; i < 256; i++) {
-        (void)inw(ATA_DATA);
+        identify[i] = inw(ATA_DATA);
     }
 
     ata_delay_400ns();
@@ -218,7 +272,32 @@ int ata_initialize(void)
         return 0;
     }
 
+    ata_decode_identify(identify);
+
     ata_ready = 1;
+    return 1;
+}
+
+/*
+ * Copy cached device information to the caller.
+ * Returns 1 when information is available, otherwise 0.
+ */
+int ata_get_device_info(ata_device_info_t *info)
+{
+    uint32_t i;
+
+    if (info == 0 || !ata_ready || !ata_info.detected) {
+        return 0;
+    }
+
+    info->detected = ata_info.detected;
+    info->lba28_sectors = ata_info.lba28_sectors;
+    info->addressable_sectors = ata_info.addressable_sectors;
+
+    for (i = 0; i < sizeof(info->model); i++) {
+        info->model[i] = ata_info.model[i];
+    }
+
     return 1;
 }
 
