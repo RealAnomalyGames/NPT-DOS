@@ -640,15 +640,32 @@ static void command_diskinfo(void)
     terminal_writeline("Note: This is NPTFS capacity, not total disk capacity.");
 }
 
+static void command_print_u32(uint32_t value)
+{
+    char buffer[11];
+    int position = 10;
+
+    buffer[position] = '\0';
+
+    do {
+        buffer[--position] = (char)('0' + (value % 10U));
+        value /= 10U;
+    } while (value != 0 && position > 0);
+
+    terminal_write(&buffer[position]);
+}
 
 static void command_diskid(void)
 {
     ata_device_info_t info;
+    uint32_t sectors;
     uint32_t mib_whole;
     uint32_t mib_fraction;
+    uint32_t gib_whole;
+    uint32_t gib_fraction;
 
-    terminal_writeline("ATA DEVICE IDENTIFICATION");
-    terminal_writeline("-------------------------");
+    terminal_writeline("NPT-DOS DISK IDENTIFICATION");
+    terminal_writeline("---------------------------");
 
     if (!ata_get_device_info(&info)) {
         terminal_writeline("No identified primary-master ATA device.");
@@ -656,26 +673,51 @@ static void command_diskid(void)
         return;
     }
 
-    terminal_write("Device: ");
+    terminal_write("Device:              ");
     terminal_writeline("Primary Master");
 
-    terminal_write("Model: ");
-    terminal_writeline(info.model[0] ? info.model : "(not reported)");
+    terminal_write("Model:               ");
+    terminal_writeline(
+        info.model[0] ? info.model : "(not reported)"
+    );
 
-    terminal_write("IDENTIFY LBA28 sectors: ");
-    /* Sector count output is added in the next integration step. */
-    terminal_writeline("available");
+    terminal_write("Reported LBA28:      ");
 
-    mib_whole = info.addressable_sectors / 2048U;
-    mib_fraction = ((info.addressable_sectors % 2048U) * 100U)
-                 / 2048U;
+    if (info.lba28_sectors == 0) {
+        terminal_writeline("Not reported");
+    } else {
+        command_print_u32(info.lba28_sectors);
+        terminal_writeline(" sectors");
+    }
 
-    terminal_write("Addressable capacity: ");
-    /* Numeric formatting depends on the kernel's existing helpers. */
-    terminal_writeline("calculated from 512-byte sectors");
+    sectors = info.addressable_sectors;
 
-    (void)mib_whole;
-    (void)mib_fraction;
+    if (sectors == 0) {
+        terminal_writeline("Addressable capacity: Unknown");
+    } else {
+        mib_whole = sectors / 2048U;
+        mib_fraction = ((sectors % 2048U) * 10U) / 2048U;
+
+        gib_whole = sectors / 2097152U;
+        gib_fraction =
+            ((sectors % 2097152U) * 10U) / 2097152U;
+
+        terminal_write("Addressable capacity: ");
+        command_print_u32(mib_whole);
+        terminal_write(".");
+        command_print_u32(mib_fraction);
+        terminal_writeline(" MiB");
+
+        terminal_write("Capacity in GiB:      ");
+        command_print_u32(gib_whole);
+        terminal_write(".");
+        command_print_u32(gib_fraction);
+        terminal_writeline(" GiB");
+    }
+
+    terminal_writeline("Addressing:           ATA LBA28");
+    terminal_writeline("Sector size:          512 bytes");
+    terminal_writeline("Disk writes:          None by this command");
 }
 
 static void command_free(void)
