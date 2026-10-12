@@ -263,7 +263,7 @@ static void installer_install_target(
 
         if (!setup_sector_is_zero(sector)) {
             terminal_writeline("SAFETY STOP: Data detected in LBAs 1-18.");
-            terminal_writeline("Choose a new, empty virtual disk.");
+            terminal_writeline("Choose a new, empty hard disk.");
             goto failed;
         }
     }
@@ -438,7 +438,7 @@ static void setup_inspect_selected_disk(
             terminal_writeline("");
             terminal_writeline("WARNING: Installation will write disk sectors.");
             terminal_writeline("A clean scan does not prove the entire disk is empty.");
-            terminal_writeline("Use only a new, disposable virtual hard disk.");
+            terminal_writeline("Use only a new, disposable hard disk if provided.");
             terminal_writeline("");
             terminal_writeline("Press I to continue to confirmation.");
             terminal_writeline("Press any other key to cancel.");
@@ -505,7 +505,6 @@ static void setup_select_disk(void)
             terminal_writeline("No supported primary-master ATA disk");
             terminal_writeline("was detected by the current driver.");
             terminal_writeline("");
-            terminal_writeline("Check the VirtualBox storage settings.");
             terminal_writeline("No disk writes were performed.");
             terminal_writeline("");
             terminal_writeline("Press any key to return to setup.");
