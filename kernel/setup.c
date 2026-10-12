@@ -146,6 +146,195 @@ static int setup_check_planned_write_sectors(uint32_t sectors)
     return 1;
 }
 
+
+#ifdef NPT_INSTALLER_BUILD
+
+extern const uint8_t installer_boot_start[];
+extern const uint8_t installer_stage2_start[];
+extern const uint8_t installer_kernel_start[];
+
+#define INSTALLER_BOOT_LBA       0U
+#define INSTALLER_STAGE2_LBA     32U
+#define INSTALLER_STAGE2_SECTORS 16U
+#define INSTALLER_KERNEL_LBA     64U
+#define INSTALLER_KERNEL_SECTORS 256U
+
+static int installer_sector_matches(
+    const uint8_t *expected,
+    const uint8_t *actual
+)
+{
+    unsigned int i;
+
+    for (i = 0; i < ATA_SECTOR_SIZE; i++) {
+        if (expected[i] != actual[i]) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+static int installer_write_verified_sector(
+    uint32_t lba,
+    const uint8_t *data
+)
+{
+    uint8_t verify[ATA_SECTOR_SIZE];
+
+    if (!ata_write_sector(lba, data)) {
+        terminal_write("WRITE FAILED at LBA ");
+        setup_print_u32(lba);
+        terminal_writeline("");
+        return 0;
+    }
+
+    if (!ata_read_sector(lba, verify)) {
+        terminal_write("READ-BACK FAILED at LBA ");
+        setup_print_u32(lba);
+        terminal_writeline("");
+        return 0;
+    }
+
+    if (!installer_sector_matches(data, verify)) {
+        terminal_write("VERIFY FAILED at LBA ");
+        setup_print_u32(lba);
+        terminal_writeline("");
+        return 0;
+    }
+
+    return 1;
+}
+
+/*
+ * The installation routine deliberately never writes LBAs 1-18.
+ *
+ * It writes the second-stage loader and kernel first, verifies them,
+ * and writes the boot sector last so a partial installation is less
+ * likely to become accidentally bootable.
+ */
+static void installer_install_target(
+    const ata_device_info_t *info
+)
+{
+    uint8_t sector[ATA_SECTOR_SIZE];
+    uint32_t lba;
+    uint32_t i;
+
+    terminal_clear();
+    terminal_writeline("NPT-DOS INSTALLER");
+    terminal_writeline("-----------------");
+    terminal_writeline("");
+    terminal_writeline("Performing final read-only checks...");
+
+    if (info == 0 ||
+        !info->detected ||
+        info->addressable_sectors < 320U) {
+        terminal_writeline("SAFETY STOP: Target capacity is insufficient.");
+        goto failed;
+    }
+
+    /*
+     * Recheck NPTFS immediately before writing.
+     */
+    if (!ata_read_sector(1U, sector)) {
+        terminal_writeline("SAFETY STOP: Cannot read LBA 1.");
+        goto failed;
+    }
+
+    if (setup_has_nptfs_signature(sector)) {
+        terminal_writeline("SAFETY STOP: NPTFS signature detected.");
+        terminal_writeline("Existing NPTFS data will not be overwritten.");
+        goto failed;
+    }
+
+    /*
+     * Be conservative: require LBAs 1-18 to be zero too.
+     * This is not a whole-disk emptiness guarantee.
+     */
+    for (lba = 1U; lba <= 18U; lba++) {
+        if (!ata_read_sector(lba, sector)) {
+            terminal_writeline("SAFETY STOP: Cannot inspect LBA.");
+            terminal_write("LBA: ");
+            setup_print_u32(lba);
+            terminal_writeline("");
+            goto failed;
+        }
+
+        if (!setup_sector_is_zero(sector)) {
+            terminal_writeline("SAFETY STOP: Data detected in LBAs 1-18.");
+            terminal_writeline("Choose a new, empty virtual disk.");
+            goto failed;
+        }
+    }
+
+    /*
+     * Recheck every sector that the installer will overwrite.
+     */
+    if (setup_check_planned_write_sectors(
+            info->addressable_sectors) != 1) {
+        terminal_writeline("SAFETY STOP: Reserved-sector check failed.");
+        terminal_writeline("Target was not approved for installation.");
+        goto failed;
+    }
+
+    terminal_writeline("Preflight checks passed.");
+    terminal_writeline("");
+    terminal_writeline("Writing second-stage loader...");
+
+    for (i = 0; i < INSTALLER_STAGE2_SECTORS; i++) {
+        if (!installer_write_verified_sector(
+                INSTALLER_STAGE2_LBA + i,
+                installer_stage2_start + i * ATA_SECTOR_SIZE)) {
+            goto failed;
+        }
+    }
+
+    terminal_writeline("Second-stage loader verified.");
+    terminal_writeline("Writing installed kernel...");
+
+    for (i = 0; i < INSTALLER_KERNEL_SECTORS; i++) {
+        if (!installer_write_verified_sector(
+                INSTALLER_KERNEL_LBA + i,
+                installer_kernel_start + i * ATA_SECTOR_SIZE)) {
+            goto failed;
+        }
+    }
+
+    terminal_writeline("Installed kernel verified.");
+    terminal_writeline("Writing boot sector last...");
+
+    if (!installer_write_verified_sector(
+            INSTALLER_BOOT_LBA,
+            installer_boot_start)) {
+        goto failed;
+    }
+
+    terminal_writeline("");
+    terminal_writeline("INSTALLATION COMPLETED.");
+    terminal_writeline("All written sectors passed read-back verification.");
+    terminal_writeline("");
+    terminal_writeline("Power off the VM, detach the installer ISO,");
+    terminal_writeline("and boot from the installed virtual hard disk.");
+
+    for (;;) {
+        __asm__ volatile ("cli; hlt");
+    }
+
+failed:
+    terminal_writeline("");
+    terminal_writeline("INSTALLATION STOPPED.");
+    terminal_writeline("The disk may contain a partial installation.");
+    terminal_writeline("Do not assume it is bootable.");
+    terminal_writeline("No automatic rollback was attempted.");
+    terminal_writeline("");
+    terminal_writeline("Press any key to return to setup.");
+    setup_wait_for_key();
+}
+
+#endif
+
+
 static void setup_inspect_selected_disk(
     const ata_device_info_t *info
 )
@@ -236,15 +425,66 @@ static void setup_inspect_selected_disk(
         terminal_writeline("Reserved sectors: CHECK FAILED.");
         terminal_writeline("SAFETY STOP: Cannot approve target.");
     }
+    
+    #ifdef NPT_INSTALLER_BUILD
+        if (read_ok &&
+            !setup_has_nptfs_signature(sector) &&
+            setup_sector_is_zero(sector) &&
+            overwrite_check == 1 &&
+            info->addressable_sectors >= 320U) {
 
-    terminal_writeline("");
-    terminal_writeline("INSTALLATION: DISABLED");
-    terminal_writeline("This is a read-only inspection.");
-    terminal_writeline("No disk writes were performed.");
-    terminal_writeline("");
-    terminal_writeline("Press any key to return.");
+            char key;
 
-    setup_wait_for_key();
+            terminal_writeline("");
+            terminal_writeline("WARNING: Installation will write disk sectors.");
+            terminal_writeline("A clean scan does not prove the entire disk is empty.");
+            terminal_writeline("Use only a new, disposable virtual hard disk.");
+            terminal_writeline("");
+            terminal_writeline("Press I to continue to confirmation.");
+            terminal_writeline("Press any other key to cancel.");
+
+            key = keyboard_getchar();
+
+            if (key == 'i' || key == 'I') {
+                terminal_clear();
+                terminal_writeline("FINAL INSTALLATION CONFIRMATION");
+                terminal_writeline("--------------------------------");
+                terminal_writeline("");
+                terminal_writeline("Target: Primary Master ATA disk");
+                terminal_writeline("Will overwrite LBAs 0, 32-47, and 64-319.");
+                terminal_writeline("Will not write LBAs 1-18.");
+                terminal_writeline("");
+                terminal_writeline("Type Y to authorize installation.");
+                terminal_writeline("Any other key cancels.");
+
+                key = keyboard_getchar();
+
+                if (key == 'y' || key == 'Y') {
+                    installer_install_target(info);
+                } else {
+                    terminal_writeline("");
+                    terminal_writeline("Installation cancelled.");
+                    setup_wait_for_key();
+                }
+            }
+        } else {
+            terminal_writeline("");
+            terminal_writeline("INSTALLATION BLOCKED.");
+            terminal_writeline("The target did not pass all safety checks.");
+            terminal_writeline("No disk writes were performed.");
+            terminal_writeline("");
+            terminal_writeline("Press any key to return.");
+            setup_wait_for_key();
+        }
+    #else
+        terminal_writeline("");
+        terminal_writeline("INSTALLATION: DISABLED IN BASE KERNEL");
+        terminal_writeline("This build performs inspection only.");
+        terminal_writeline("No disk writes were performed.");
+        terminal_writeline("");
+        terminal_writeline("Press any key to return.");
+        setup_wait_for_key();
+    #endif
 }
 
 static void setup_select_disk(void)
