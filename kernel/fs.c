@@ -265,6 +265,11 @@ fs_result_t fs_write(const char *name, const char *text)
 
     index = find_file(name);
 
+    if (index >= 0 &&
+        (entry_at(index)[19] & FS_ATTR_READ_ONLY)) {
+        return FS_READ_ONLY;
+    }
+
     if (index < 0) {
         result = fs_create(name);
 
@@ -347,6 +352,10 @@ fs_result_t fs_delete(const char *name)
 
     if (index < 0) return FS_NOT_FOUND;
 
+    if (entry_at(index)[19] & FS_ATTR_READ_ONLY) {
+        return FS_READ_ONLY;
+    }
+
     entry = entry_at(index);
 
     for (i = 0; i < ENTRY_SIZE; i++) entry[i] = 0;
@@ -406,4 +415,59 @@ int fs_file_size(const char *name)
     entry = entry_at(index);
 
     return (int)entry[17] | ((int)entry[18] << 8);
+}
+
+int fs_get_attributes(const char *name)
+{
+    int index;
+
+    if (!filesystem_ready || !valid_name(name)) {
+        return -1;
+    }
+
+    index = find_file(name);
+
+    if (index < 0) {
+        return -1;
+    }
+
+    return (int)entry_at(index)[19];
+}
+
+fs_result_t fs_set_attributes(const char *name, int attributes)
+{
+    int index;
+    uint8_t *entry;
+    uint8_t previous;
+    fs_result_t result;
+
+    if (!filesystem_ready) return FS_NOT_READY;
+    if (!valid_name(name)) return FS_INVALID_NAME;
+
+    if (attributes < 0 ||
+        (attributes & ~FS_ATTR_MASK) != 0) {
+        return FS_INVALID_NAME;
+    }
+
+    index = find_file(name);
+
+    if (index < 0) return FS_NOT_FOUND;
+
+    entry = entry_at(index);
+    previous = entry[19];
+
+    /*
+     * Attribute changes are allowed even when a file is
+     * read-only, so its owner can remove the R attribute.
+     */
+    entry[19] = (uint8_t)attributes;
+
+    result = save_directory();
+
+    if (result != FS_OK) {
+        entry[19] = previous;
+        return result;
+    }
+
+    return FS_OK;
 }
