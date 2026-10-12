@@ -34,6 +34,23 @@ jobs:
       - name: Compile kernel and create ISO
         run: make
 
+      - name: Build hard-disk installation assets
+        run: make installer-assets
+
+      - name: Validate installation asset sizes
+        run: make check-installer-assets
+
+      - name: Upload installation assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: npt-dos-build-014-e-installation-assets
+          path: |
+            build/installer_boot.bin
+            build/second_stage.bin
+            build/installed_kernel.bin
+            build/installer_boot.bin.sha256
+          if-no-files-found: error
+
       - name: Validate Multiboot kernel
         run: make check
 
@@ -48,6 +65,14 @@ jobs:
           sha256sum build/npt-dos-build-014.iso > build/npt-dos-build-014.iso.sha256
           cat build/npt-dos-build-014.iso.sha256
 
+      - name: Generate installation asset checksums
+        run: |
+          sha256sum \
+            build/installer_boot.bin \
+            build/second_stage.bin \
+            build/installed_kernel.bin \
+            > build/installation-assets.sha256
+
       - name: Upload bootable ISO
         uses: actions/upload-artifact@v4
         with:
@@ -55,3 +80,4 @@ jobs:
           path: |
             build/npt-dos-build-014.iso
             build/npt-dos-build-014.iso.sha256
+            build/installation-assets.sha256
