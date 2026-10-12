@@ -1,3 +1,4 @@
+
 name: NPT-DOS Build 014
 
 on:
@@ -12,7 +13,7 @@ permissions:
 
 jobs:
   build:
-    name: Build and Validate NPT-DOS ISO
+    name: Build and Validate NPT-DOS Installer
     runs-on: ubuntu-24.04
 
     steps:
@@ -29,55 +30,95 @@ jobs:
             grub-common \
             xorriso \
             mtools \
-            nasm
+            nasm \
+            binutils \
+            file
 
-      - name: Compile kernel and create ISO
+      - name: Build ISO and installer assets
         run: make
 
-      - name: Build hard-disk installation assets
-        run: make installer-assets
-
-      - name: Validate installation asset sizes
-        run: make check-installer-assets
-
-      - name: Upload installation assets
-        uses: actions/upload-artifact@v4
-        with:
-          name: npt-dos-build-014-e-installation-assets
-          path: |
-            build/installer_boot.bin
-            build/second_stage.bin
-            build/installed_kernel.bin
-            build/installer_boot.bin.sha256
-          if-no-files-found: error
-
-      - name: Validate Multiboot kernel
+      - name: Validate both Multiboot kernels
         run: make check
 
-      - name: Verify ISO exists
+      - name: Validate installer assets
+        run: make check-installer-assets
+
+      - name: Verify exact binary sizes
+        shell: bash
         run: |
+          set -euo pipefail
+
+          test "$(wc -c < build/installer_boot.bin)" -eq 512
+          test "$(wc -c < build/second_stage.bin)" -eq 8192
+          test "$(wc -c < build/installed_kernel.bin)" -eq 131072
+
+          echo "Installer boot sector: 512 bytes"
+          echo "Second-stage loader: 8192 bytes"
+          echo "Installed kernel image: 131072 bytes"
+
+      - name: Verify BIOS boot signature
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SIGNATURE="$(od -An -tx1 -j510 -N2 build/installer_boot.bin | tr -d ' \n')"
+
+          if [ "$SIGNATURE" != "55aa" ]; then
+            echo "ERROR: Invalid BIOS boot signature: $SIGNATURE"
+            exit 1
+          fi
+
+          echo "BIOS boot signature verified: 55 AA"
+
+      - name: Verify installer assets are embedded
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          nm build/kernel.elf | grep -q 'installer_boot_start'
+          nm build/kernel.elf | grep -q 'installer_boot_end'
+          nm build/kernel.elf | grep -q 'installer_stage2_start'
+          nm build/kernel.elf | grep -q 'installer_stage2_end'
+          nm build/kernel.elf | grep -q 'installer_kernel_start'
+          nm build/kernel.elf | grep -q 'installer_kernel_end'
+
+          echo "All expected installer asset symbols are present."
+
+      - name: Verify bootable ISO exists
+        shell: bash
+        run: |
+          set -euo pipefail
+
           test -s build/npt-dos-build-014.iso
           file build/npt-dos-build-014.iso
           ls -lh build/npt-dos-build-014.iso
 
-      - name: Generate ISO SHA-256 checksum
+      - name: Generate SHA-256 checksums
+        shell: bash
         run: |
-          sha256sum build/npt-dos-build-014.iso > build/npt-dos-build-014.iso.sha256
-          cat build/npt-dos-build-014.iso.sha256
+          set -euo pipefail
 
-      - name: Generate installation asset checksums
-        run: |
           sha256sum \
+            build/npt-dos-build-014.iso \
+            build/kernel-base.elf \
+            build/kernel.elf \
             build/installer_boot.bin \
             build/second_stage.bin \
             build/installed_kernel.bin \
-            > build/installation-assets.sha256
+            > build/SHA256SUMS
 
-      - name: Upload bootable ISO
+          cat build/SHA256SUMS
+
+      - name: Upload validated Build 014 artifacts
         uses: actions/upload-artifact@v4
         with:
           name: npt-dos-build-014
+          if-no-files-found: error
           path: |
             build/npt-dos-build-014.iso
-            build/npt-dos-build-014.iso.sha256
-            build/installation-assets.sha256
+            build/SHA256SUMS
+            build/kernel-base.elf
+            build/kernel.elf
+            build/installer_boot.bin
+            build/second_stage.bin
+            build/installed_kernel.bin
