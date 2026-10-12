@@ -137,6 +137,10 @@ gdt_descriptor:
 
 .code32
 protected_mode_entry:
+    /* QEMU diagnostic: protected-mode entry reached. */
+    movb $'3', %al
+    outb %al, $0xE9
+
     movw $0x10, %ax
     movw %ax, %ds
     movw %ax, %es
@@ -160,10 +164,6 @@ protected_mode_entry:
     /* Transfer control to the kernel entry point. */
     movl $0x100000, %eax
     jmp *%eax
-
-    /* QEMU diagnostic: protected-mode entry reached. */
-    movb $'3', %al
-    outb %al, $0xE9
 
 stage2_halt:
     cli
