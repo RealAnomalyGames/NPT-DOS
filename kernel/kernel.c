@@ -640,6 +640,44 @@ static void command_diskinfo(void)
     terminal_writeline("Note: This is NPTFS capacity, not total disk capacity.");
 }
 
+
+static void command_diskid(void)
+{
+    ata_device_info_t info;
+    uint32_t mib_whole;
+    uint32_t mib_fraction;
+
+    terminal_writeline("ATA DEVICE IDENTIFICATION");
+    terminal_writeline("-------------------------");
+
+    if (!ata_get_device_info(&info)) {
+        terminal_writeline("No identified primary-master ATA device.");
+        terminal_writeline("Check the VirtualBox storage controller.");
+        return;
+    }
+
+    terminal_write("Device: ");
+    terminal_writeline("Primary Master");
+
+    terminal_write("Model: ");
+    terminal_writeline(info.model[0] ? info.model : "(not reported)");
+
+    terminal_write("IDENTIFY LBA28 sectors: ");
+    /* Sector count output is added in the next integration step. */
+    terminal_writeline("available");
+
+    mib_whole = info.addressable_sectors / 2048U;
+    mib_fraction = ((info.addressable_sectors % 2048U) * 100U)
+                 / 2048U;
+
+    terminal_write("Addressable capacity: ");
+    /* Numeric formatting depends on the kernel's existing helpers. */
+    terminal_writeline("calculated from 512-byte sectors");
+
+    (void)mib_whole;
+    (void)mib_fraction;
+}
+
 static void command_free(void)
 {
     int used;
