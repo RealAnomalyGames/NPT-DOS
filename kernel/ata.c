@@ -303,7 +303,9 @@ int ata_get_device_info(ata_device_info_t *info)
 
 static int ata_prepare(uint32_t lba, uint8_t command)
 {
-    if (!ata_ready || lba > ATA_MAX_LBA) {
+    if (!ata_ready ||
+        lba > ATA_MAX_LBA ||
+        lba >= ata_info.addressable_sectors) {
         return 0;
     }
 
