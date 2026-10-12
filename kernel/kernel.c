@@ -3,6 +3,8 @@
 #include "keyboard.h"
 #include "terminal.h"
 #include "ata.h"
+#include "timer.h"
+#include "rtc.h"
 
 #define INPUT_BUFFER_SIZE 128
 #define APPEND_BUFFER_SIZE (FS_CONTENT_MAX + 1)
@@ -156,7 +158,7 @@ static void print_file_attributes(const char *name)
 
 static void command_help(void)
 {
-    terminal_writeline("NPT-DOS Build 010 Commands");
+    terminal_writeline("NPT-DOS Build 011 Commands");
     terminal_writeline("--------------------------");
     terminal_writeline("HELP                    List commands");
     terminal_writeline("VER                     Display version");
@@ -164,6 +166,11 @@ static void command_help(void)
     terminal_writeline("ECHO <text>             Display text");
     terminal_writeline("INFO                    System information");
     terminal_writeline("EXIT                    Display exit information");
+    terminal_writeline("SYSINFO                 Detailed system information");
+    terminal_writeline("MEM                     Memory information");
+    terminal_writeline("UPTIME                  Time since boot");
+    terminal_writeline("DATE                    Display current date");
+    terminal_writeline("TIME                    Display current time");
     terminal_writeline("DIR [/A]                List files");
     terminal_writeline("TREE [/A]               Display file tree");
     terminal_writeline("TOUCH <name>            Create an empty file");
@@ -184,6 +191,7 @@ static void command_help(void)
     terminal_writeline("FREE                    Available storage");
     terminal_writeline("FSINFO                  Filesystem information");
     terminal_writeline("FORMAT CONFIRM          Format the NPTFS disk");
+    
     terminal_writeline("");
     terminal_writeline("Attributes: R=Read-only H=Hidden S=System");
     terminal_writeline("Use /A with DIR or TREE to show hidden files.");
@@ -192,7 +200,7 @@ static void command_help(void)
 
 static void command_ver(void)
 {
-    terminal_writeline("NPT-DOS Build 010");
+    terminal_writeline("NPT-DOS Build 011");
     terminal_writeline("32-bit x86 operating system");
     terminal_writeline("Neptune Corporation");
 }
@@ -717,6 +725,109 @@ static void command_attrib(char *arguments)
     report_fs_result(fs_set_attributes(name, attributes));
 }
 
+
+static void command_sysinfo(void)
+{
+    terminal_writeline("NPT-DOS System Information");
+    terminal_writeline("--------------------------");
+    terminal_writeline("Operating system: NPT-DOS");
+    terminal_writeline("Build: 011");
+    terminal_writeline("Publisher: Neptune Corporation");
+    terminal_writeline("Architecture: 32-bit x86");
+    terminal_writeline("Bootloader: GRUB / Multiboot");
+    terminal_writeline("Console: VGA text mode");
+    terminal_writeline("Keyboard: PS/2 polling");
+    terminal_writeline("Timer: PIT channel 0, polled");
+    terminal_writeline("Clock: CMOS real-time clock");
+    terminal_writeline("Filesystem: NPTFS v1");
+    terminal_writeline("Storage interface: ATA PIO");
+    terminal_writeline("Interrupt-driven scheduling: Not implemented");
+}
+
+static void command_mem(void)
+{
+    terminal_writeline("NPT-DOS Memory Information");
+    terminal_writeline("---------------------------");
+    terminal_writeline("Architecture: 32-bit x86");
+    terminal_writeline("Kernel stack reservation: 16384 bytes (16 KiB)");
+    terminal_writeline("Stack: Single boot-time stack");
+    terminal_writeline("Dynamic memory allocator: Not implemented");
+    terminal_writeline("Physical memory map: Not yet available");
+    terminal_writeline("Free physical memory: Unknown");
+    terminal_writeline("");
+    terminal_writeline("The stack reservation is not total RAM.");
+}
+
+static void command_uptime(void)
+{
+    uint32_t total_seconds = timer_get_uptime_seconds();
+    unsigned int hours = total_seconds / 3600U;
+    unsigned int minutes = (total_seconds / 60U) % 60U;
+    unsigned int seconds = total_seconds % 60U;
+
+    terminal_writeline("NPT-DOS Uptime");
+    terminal_writeline("--------------");
+
+    terminal_write("Elapsed: ");
+    print_unsigned(hours);
+    terminal_write(":");
+
+    terminal_putchar((char)('0' + minutes / 10U));
+    terminal_putchar((char)('0' + minutes % 10U));
+    terminal_write(":");
+
+    terminal_putchar((char)('0' + seconds / 10U));
+    terminal_putchar((char)('0' + seconds % 10U));
+
+    terminal_writeline(" (HH:MM:SS)");
+    terminal_write("Timer ticks: ");
+    print_unsigned(timer_get_ticks());
+    terminal_writeline(" (approximately 100 ticks/second)");
+}
+
+static void print_two_digits(unsigned int value)
+{
+    terminal_putchar((char)('0' + (value / 10U) % 10U));
+    terminal_putchar((char)('0' + value % 10U));
+}
+
+static void command_date(void)
+{
+    rtc_datetime_t dt;
+
+    if (!rtc_read(&dt)) {
+        terminal_writeline("Error: Could not read the real-time clock.");
+        return;
+    }
+
+    terminal_write("Current date: ");
+    print_unsigned(dt.year);
+    terminal_write("-");
+    print_two_digits(dt.month);
+    terminal_write("-");
+    print_two_digits(dt.day);
+    terminal_writeline("");
+}
+
+static void command_time(void)
+{
+    rtc_datetime_t dt;
+
+    if (!rtc_read(&dt)) {
+        terminal_writeline("Error: Could not read the real-time clock.");
+        return;
+    }
+
+    terminal_write("Current time: ");
+    print_two_digits(dt.hour);
+    terminal_write(":");
+    print_two_digits(dt.minute);
+    terminal_write(":");
+    print_two_digits(dt.second);
+    terminal_writeline(" (24-hour)");
+}
+
+
 static void execute_command(char *line)
 {
     char *arguments = skip_spaces(line);
@@ -827,6 +938,21 @@ static void execute_command(char *line)
             if (fs_is_ready()) terminal_writeline("NPTFS format completed.");
             else terminal_writeline("NPTFS remains unavailable.");
         }
+    } else if (string_equals_ignore_case(command, "SYSINFO")) {
+        if (*arguments != '\0') terminal_writeline("Usage: SYSINFO");
+        else command_sysinfo();
+    } else if (string_equals_ignore_case(command, "MEM")) {
+        if (*arguments != '\0') terminal_writeline("Usage: MEM");
+        else command_mem();
+    } else if (string_equals_ignore_case(command, "UPTIME")) {
+        if (*arguments != '\0') terminal_writeline("Usage: UPTIME");
+        else command_uptime();
+    } else if (string_equals_ignore_case(command, "DATE")) {
+        if (*arguments != '\0') terminal_writeline("Usage: DATE");
+        else command_date();
+    } else if (string_equals_ignore_case(command, "TIME")) {
+        if (*arguments != '\0') terminal_writeline("Usage: TIME");
+        else command_time();
     } else {
         terminal_write("Unknown command: ");
         terminal_writeline(command);
@@ -839,10 +965,11 @@ void kernel_main(void)
     char input[INPUT_BUFFER_SIZE];
 
     terminal_initialize();
+    timer_initialize();
     keyboard_initialize();
     fs_initialize();
 
-    terminal_writeline("NPT-DOS Build 010");
+    terminal_writeline("NPT-DOS Build 011");
     terminal_writeline("Neptune Corporation");
     terminal_writeline("--------------------------------");
 
