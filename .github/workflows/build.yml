@@ -175,16 +175,11 @@ jobs:
 
           cat build/SHA256SUMS
 
-      - name: Upload validated Build 014 artifacts
+      - name: Upload validated Build 014 ISO
         uses: actions/upload-artifact@v4
         with:
-          name: npt-dos-build-014
+          name: npt-dos-build-014-iso
           if-no-files-found: error
           path: |
             build/npt-dos-build-014.iso
             build/SHA256SUMS
-            build/kernel-base.elf
-            build/kernel.elf
-            build/installer_boot.bin
-            build/second_stage.bin
-            build/installed_kernel.bin
