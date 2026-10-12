@@ -200,6 +200,9 @@ static void report_fs_result(fs_result_t result)
         case FS_IO_ERROR:
             terminal_writeline("Error: Disk read/write operation failed.");
             break;
+        case FS_READ_ONLY:
+            terminal_writeline("Error: File is read-only.");
+            break;
     }
 }
 
