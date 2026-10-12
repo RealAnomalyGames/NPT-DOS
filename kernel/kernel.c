@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stddef.h>
 #include "fs.h"
 #include "keyboard.h"
@@ -9,6 +10,17 @@
 #define INPUT_BUFFER_SIZE 128
 #define APPEND_BUFFER_SIZE (FS_CONTENT_MAX + 1)
 #define HEAD_DISPLAY_LENGTH 80
+
+#define HISTORY_CAPACITY 10
+#define PROMPT_MAX_LENGTH 30
+
+static int verbose_mode = 0;
+
+static char command_history_buffer[HISTORY_CAPACITY][INPUT_BUFFER_SIZE];
+static unsigned int history_count = 0;
+static unsigned int history_next = 0;
+
+static char shell_prompt[PROMPT_MAX_LENGTH + 1] = "NPT-DOS";
 
 static int string_equals_ignore_case(const char *a, const char *b)
 {
@@ -79,6 +91,11 @@ static void print_unsigned(unsigned int value)
 
 static void report_fs_result(fs_result_t result)
 {
+    if (verbose_mode) {
+        terminal_write("[VERBOSE] Filesystem result code: ");
+        print_unsigned((unsigned int)result);
+        terminal_writeline("");
+    }
     switch (result) {
         case FS_OK:
             terminal_writeline("Operation completed.");
@@ -156,51 +173,180 @@ static void print_file_attributes(const char *name)
     terminal_write("]");
 }
 
-static void command_help(void)
+
+static void command_help(char *arguments)
 {
-    terminal_writeline("NPT-DOS Build 011 Commands");
-    terminal_writeline("--------------------------");
-    terminal_writeline("HELP                    List commands");
-    terminal_writeline("VER                     Display version");
-    terminal_writeline("CLS                     Clear screen");
-    terminal_writeline("ECHO <text>             Display text");
-    terminal_writeline("INFO                    System information");
-    terminal_writeline("EXIT                    Display exit information");
-    terminal_writeline("SYSINFO                 Detailed system information");
-    terminal_writeline("MEM                     Memory information");
-    terminal_writeline("UPTIME                  Time since boot");
-    terminal_writeline("DATE                    Display current date");
-    terminal_writeline("TIME                    Display current time");
-    terminal_writeline("DIR [/A]                List files");
-    terminal_writeline("TREE [/A]               Display file tree");
-    terminal_writeline("TOUCH <name>            Create an empty file");
-    terminal_writeline("WRITE <name> <text>     Write file contents");
-    terminal_writeline("TYPE <name>             Display file contents");
-    terminal_writeline("DEL <name>              Delete a file");
-    terminal_writeline("COPY <src> <dest>       Copy a file");
-    terminal_writeline("REN <old> <new>         Rename a file");
-    terminal_writeline("RENAME <old> <new>      Rename a file");
-    terminal_writeline("SIZE <name>             Display file size");
-    terminal_writeline("APPEND <name> <text>    Append text");
-    terminal_writeline("HEAD <name>             Display first 80 characters");
-    terminal_writeline("FIND <name> <text>      Search file contents");
-    terminal_writeline("CLEAR <name>            Empty a file");
-    terminal_writeline("REPLACE <name> <text>   Replace file contents");
-    terminal_writeline("ATTRIB <name> [+/-RHS]  View or change attributes");
-    terminal_writeline("DISKINFO                Disk/filesystem details");
-    terminal_writeline("FREE                    Available storage");
-    terminal_writeline("FSINFO                  Filesystem information");
-    terminal_writeline("FORMAT CONFIRM          Format the NPTFS disk");
-    
-    terminal_writeline("");
-    terminal_writeline("Attributes: R=Read-only H=Hidden S=System");
-    terminal_writeline("Use /A with DIR or TREE to show hidden files.");
-    terminal_writeline("WARNING: Formatting erases NPTFS data.");
+    char *topic = take_token(&arguments);
+
+    arguments = skip_spaces(arguments);
+
+    if (*topic == '\0') {
+        terminal_writeline("NPT-DOS Build 012 Commands");
+        terminal_writeline("--------------------------");
+        terminal_writeline("HELP [command]          List commands or show command help");
+        terminal_writeline("VER                     Display version");
+        terminal_writeline("CLS                     Clear screen");
+        terminal_writeline("ECHO <text>             Display text");
+        terminal_writeline("INFO                    Basic system information");
+        terminal_writeline("SYSINFO                 Detailed system information");
+        terminal_writeline("MEM                     Memory information");
+        terminal_writeline("UPTIME                  Time since boot");
+        terminal_writeline("DATE                    Display current date");
+        terminal_writeline("TIME                    Display current time");
+        terminal_writeline("VERBOSE [ON|OFF]        Toggle verbose mode");
+        terminal_writeline("HISTORY                 Show recent commands");
+        terminal_writeline("REBOOT                  Restart the machine");
+        terminal_writeline("PROMPT [text]           View or change the prompt");
+        terminal_writeline("PAUSE                   Wait for a key");
+        terminal_writeline("DIR [/A]                List files");
+        terminal_writeline("TREE [/A]               Display file tree");
+        terminal_writeline("TOUCH <name>            Create an empty file");
+        terminal_writeline("WRITE <name> <text>     Write file contents");
+        terminal_writeline("TYPE <name>             Display file contents");
+        terminal_writeline("DEL <name>              Delete a file");
+        terminal_writeline("COPY <src> <dest>       Copy a file");
+        terminal_writeline("REN <old> <new>         Rename a file");
+        terminal_writeline("RENAME <old> <new>      Rename a file");
+        terminal_writeline("SIZE <name>             Display file size");
+        terminal_writeline("APPEND <name> <text>    Append text");
+        terminal_writeline("HEAD <name>             Display first 80 characters");
+        terminal_writeline("FIND <name> <text>      Search file contents");
+        terminal_writeline("CLEAR <name>            Empty a file");
+        terminal_writeline("REPLACE <name> <text>   Replace file contents");
+        terminal_writeline("ATTRIB <name> [+/-RHS]  View or change attributes");
+        terminal_writeline("DISKINFO                Disk/filesystem details");
+        terminal_writeline("FREE                    Available storage");
+        terminal_writeline("FSINFO                  Filesystem information");
+        terminal_writeline("FORMAT CONFIRM          Format the NPTFS disk");
+        terminal_writeline("EXIT                    Display exit information");
+        terminal_writeline("");
+        terminal_writeline("Use HELP <command> for details.");
+        terminal_writeline("WARNING: FORMAT CONFIRM erases NPTFS data.");
+        return;
+    }
+
+    if (*arguments != '\0') {
+        terminal_writeline("Usage: HELP [command]");
+        return;
+    }
+
+    if (string_equals_ignore_case(topic, "HELP")) {
+        terminal_writeline("HELP [command]");
+        terminal_writeline("Lists all commands or displays help for one command.");
+    } else if (string_equals_ignore_case(topic, "VERBOSE")) {
+        terminal_writeline("VERBOSE [ON|OFF]");
+        terminal_writeline("Without an argument, toggles verbose mode.");
+        terminal_writeline("ON and OFF explicitly set the mode.");
+    } else if (string_equals_ignore_case(topic, "HISTORY")) {
+        terminal_writeline("HISTORY");
+        terminal_writeline("Shows up to 10 recent commands from this session.");
+    } else if (string_equals_ignore_case(topic, "REBOOT")) {
+        terminal_writeline("REBOOT");
+        terminal_writeline("Requests a hardware reset immediately.");
+        terminal_writeline("Shell history and prompt settings are not saved.");
+    } else if (string_equals_ignore_case(topic, "PROMPT")) {
+        terminal_writeline("PROMPT [text]");
+        terminal_writeline("Shows or changes the shell prompt.");
+        terminal_writeline("Maximum custom prompt length: 30 characters.");
+    } else if (string_equals_ignore_case(topic, "PAUSE")) {
+        terminal_writeline("PAUSE");
+        terminal_writeline("Waits until a key is pressed.");
+    } else if (string_equals_ignore_case(topic, "VER")) {
+        terminal_writeline("VER");
+        terminal_writeline("Displays the NPT-DOS build and publisher.");
+    } else if (string_equals_ignore_case(topic, "CLS")) {
+        terminal_writeline("CLS");
+        terminal_writeline("Clears the terminal screen.");
+    } else if (string_equals_ignore_case(topic, "ECHO")) {
+        terminal_writeline("ECHO <text>");
+        terminal_writeline("Displays the supplied text.");
+    } else if (string_equals_ignore_case(topic, "INFO") ||
+               string_equals_ignore_case(topic, "SYSINFO")) {
+        terminal_writeline("INFO / SYSINFO");
+        terminal_writeline("Displays basic or detailed system information.");
+    } else if (string_equals_ignore_case(topic, "MEM")) {
+        terminal_writeline("MEM");
+        terminal_writeline("Displays available memory information.");
+    } else if (string_equals_ignore_case(topic, "UPTIME")) {
+        terminal_writeline("UPTIME");
+        terminal_writeline("Displays elapsed time since boot.");
+    } else if (string_equals_ignore_case(topic, "DATE")) {
+        terminal_writeline("DATE");
+        terminal_writeline("Displays the RTC date as YYYY-MM-DD.");
+    } else if (string_equals_ignore_case(topic, "TIME")) {
+        terminal_writeline("TIME");
+        terminal_writeline("Displays the RTC time in 24-hour format.");
+    } else if (string_equals_ignore_case(topic, "DIR")) {
+        terminal_writeline("DIR [/A]");
+        terminal_writeline("Lists files; /A includes hidden files.");
+    } else if (string_equals_ignore_case(topic, "TREE")) {
+        terminal_writeline("TREE [/A]");
+        terminal_writeline("Displays the directory tree; /A includes hidden files.");
+    } else if (string_equals_ignore_case(topic, "TOUCH")) {
+        terminal_writeline("TOUCH <name>");
+        terminal_writeline("Creates an empty file.");
+    } else if (string_equals_ignore_case(topic, "WRITE")) {
+        terminal_writeline("WRITE <name> <text>");
+        terminal_writeline("Creates or overwrites a file with text.");
+    } else if (string_equals_ignore_case(topic, "TYPE")) {
+        terminal_writeline("TYPE <name>");
+        terminal_writeline("Displays file contents.");
+    } else if (string_equals_ignore_case(topic, "DEL")) {
+        terminal_writeline("DEL <name>");
+        terminal_writeline("Deletes a file unless it is read-only.");
+    } else if (string_equals_ignore_case(topic, "COPY")) {
+        terminal_writeline("COPY <source> <destination>");
+        terminal_writeline("Copies file contents and attributes.");
+    } else if (string_equals_ignore_case(topic, "REN") ||
+               string_equals_ignore_case(topic, "RENAME")) {
+        terminal_writeline("RENAME <old> <new> (REN is an alias)");
+        terminal_writeline("Renames a file without copying its contents.");
+    } else if (string_equals_ignore_case(topic, "SIZE")) {
+        terminal_writeline("SIZE <name>");
+        terminal_writeline("Displays file size in bytes.");
+    } else if (string_equals_ignore_case(topic, "APPEND")) {
+        terminal_writeline("APPEND <name> <text>");
+        terminal_writeline("Adds text to the end of a file.");
+    } else if (string_equals_ignore_case(topic, "HEAD")) {
+        terminal_writeline("HEAD <name>");
+        terminal_writeline("Displays the first 80 characters of a file.");
+    } else if (string_equals_ignore_case(topic, "FIND")) {
+        terminal_writeline("FIND <name> <text>");
+        terminal_writeline("Searches file contents without case sensitivity.");
+    } else if (string_equals_ignore_case(topic, "CLEAR")) {
+        terminal_writeline("CLEAR <name>");
+        terminal_writeline("Empties a file but keeps its name.");
+    } else if (string_equals_ignore_case(topic, "REPLACE")) {
+        terminal_writeline("REPLACE <name> <text>");
+        terminal_writeline("Replaces all file contents.");
+    } else if (string_equals_ignore_case(topic, "ATTRIB")) {
+        terminal_writeline("ATTRIB <name> [+R|-R|+H|-H|+S|-S]");
+        terminal_writeline("R=Read-only, H=Hidden, S=System.");
+    } else if (string_equals_ignore_case(topic, "DISKINFO")) {
+        terminal_writeline("DISKINFO");
+        terminal_writeline("Displays NPTFS storage layout and capacity.");
+    } else if (string_equals_ignore_case(topic, "FREE")) {
+        terminal_writeline("FREE");
+        terminal_writeline("Displays available NPTFS file slots.");
+    } else if (string_equals_ignore_case(topic, "FSINFO")) {
+        terminal_writeline("FSINFO");
+        terminal_writeline("Displays NPTFS status and limits.");
+    } else if (string_equals_ignore_case(topic, "FORMAT")) {
+        terminal_writeline("FORMAT CONFIRM");
+        terminal_writeline("Destructively formats the NPTFS data area.");
+        terminal_writeline("WARNING: Existing NPTFS files will be erased.");
+    } else if (string_equals_ignore_case(topic, "EXIT")) {
+        terminal_writeline("EXIT");
+        terminal_writeline("Explains why there is no host prompt to return to.");
+    } else {
+        terminal_write("No detailed help available for: ");
+        terminal_writeline(topic);
+    }
 }
 
 static void command_ver(void)
 {
-    terminal_writeline("NPT-DOS Build 011");
+    terminal_writeline("NPT-DOS Build 012");
     terminal_writeline("32-bit x86 operating system");
     terminal_writeline("Neptune Corporation");
 }
@@ -215,6 +361,166 @@ static void command_info(void)
     terminal_writeline("Bootloader: GRUB");
     terminal_writeline("Filesystem: NPTFS v1");
     terminal_writeline("Storage: IDE hard disk");
+}
+
+static void command_verbose(char *arguments)
+{
+    arguments = skip_spaces(arguments);
+
+    if (*arguments == '\0') {
+        verbose_mode = !verbose_mode;
+    } else if (string_equals_ignore_case(arguments, "ON")) {
+        verbose_mode = 1;
+    } else if (string_equals_ignore_case(arguments, "OFF")) {
+        verbose_mode = 0;
+    } else {
+        terminal_writeline("Usage: VERBOSE [ON|OFF]");
+        return;
+    }
+
+    terminal_write("Verbose mode: ");
+    terminal_writeline(verbose_mode ? "ON" : "OFF");
+}
+
+static void command_history(void)
+{
+    unsigned int oldest;
+    unsigned int i;
+
+    terminal_writeline("NPT-DOS Command History");
+    terminal_writeline("-----------------------");
+
+    if (history_count == 0) {
+        terminal_writeline("No commands recorded.");
+        return;
+    }
+
+    oldest = (history_next + HISTORY_CAPACITY - history_count)
+             % HISTORY_CAPACITY;
+
+    for (i = 0; i < history_count; i++) {
+        unsigned int index = (oldest + i) % HISTORY_CAPACITY;
+
+        print_unsigned(i + 1);
+        terminal_write(": ");
+        terminal_writeline(command_history_buffer[index]);
+    }
+
+    terminal_write("Stored commands: ");
+    print_unsigned(history_count);
+    terminal_writeline("");
+}
+
+static void command_prompt(char *arguments)
+{
+    size_t length = 0;
+    size_t i;
+
+    arguments = skip_spaces(arguments);
+
+    if (*arguments == '\0') {
+        terminal_write("Current prompt: ");
+        terminal_write(shell_prompt);
+        terminal_writeline(">");
+        terminal_writeline("Usage: PROMPT <text>");
+        return;
+    }
+
+    while (arguments[length] != '\0') {
+        if (length >= PROMPT_MAX_LENGTH) {
+            terminal_writeline("Error: Prompt cannot exceed 30 characters.");
+            return;
+        }
+
+        if (arguments[length] < 32 || arguments[length] > 126) {
+            terminal_writeline("Error: Prompt contains an invalid character.");
+            return;
+        }
+
+        length++;
+    }
+
+    if (length == 0) {
+        terminal_writeline("Error: Prompt cannot be empty.");
+        return;
+    }
+
+    for (i = 0; i < length; i++) {
+        shell_prompt[i] = arguments[i];
+    }
+
+    shell_prompt[length] = 'f\0';
+
+    terminal_write("Prompt changed to: ");
+    terminal_write(shell_prompt);
+    terminal_writeline(">");
+}
+
+static void command_pause(void)
+{
+    terminal_write("Press any key to continue...");
+    (void)keyboard_getchar();
+    terminal_writeline("");
+}
+
+static void command_reboot(void)
+{
+    unsigned int attempts;
+
+    terminal_writeline("Restarting NPT-DOS...");
+    terminal_writeline("Unsaved shell history and prompt settings will be lost.");
+
+    /*
+     * Wait briefly for the keyboard controller input buffer
+     * to become empty, then request a system reset.
+     */
+    for (attempts = 0; attempts < 1000000U; attempts++) {
+        uint8_t status;
+
+        __asm__ volatile (
+            "inb %1, %0"
+            : "=a"(status)
+            : "Nd"((uint16_t)0x64)
+        );
+
+        if ((status & 0x02U) == 0) {
+            break;
+        }
+    }
+
+    __asm__ volatile (
+        "outb %0, %1"
+        :
+        : "a"((uint8_t)0xFE), "Nd"((uint16_t)0x64)
+    );
+
+    /*
+     * If the reset request did not reset the machine,
+     * stop execution rather than returning to the shell.
+     */
+    for (;;) {
+        __asm__ volatile ("cli; hlt");
+    }
+}
+
+static void record_command(const char *line)
+{
+    size_t i = 0;
+
+    if (line == NULL || *line == '\0') return;
+
+    while (line[i] != '\0' && i < INPUT_BUFFER_SIZE - 1) {
+        command_history_buffer[history_next][i] = line[i];
+        i++;
+    }
+
+    command_history_buffer[history_next][i] = '\0';
+
+    history_next = (history_next + 1) % HISTORY_CAPACITY;
+
+    if (history_count < HISTORY_CAPACITY) {
+        history_count++;
+    }
 }
 
 static void command_dir(char *arguments)
@@ -731,7 +1037,7 @@ static void command_sysinfo(void)
     terminal_writeline("NPT-DOS System Information");
     terminal_writeline("--------------------------");
     terminal_writeline("Operating system: NPT-DOS");
-    terminal_writeline("Build: 011");
+    terminal_writeline("Build: 012");
     terminal_writeline("Publisher: Neptune Corporation");
     terminal_writeline("Architecture: 32-bit x86");
     terminal_writeline("Bootloader: GRUB / Multiboot");
@@ -837,8 +1143,35 @@ static void execute_command(char *line)
 
     if (*command == '\0') return;
 
+    if (verbose_mode) {
+        terminal_write("[VERBOSE] Executing: ");
+         terminal_writeline(command);
+    }
+
     if (string_equals_ignore_case(command, "HELP")) {
-        command_help();
+        command_help(arguments);
+    } else if (string_equals_ignore_case(command, "VERBOSE")) {
+        command_verbose(arguments);
+    } else if (string_equals_ignore_case(command, "HISTORY")) {
+        if (*arguments != '\0') {
+            terminal_writeline("Usage: HISTORY");
+        } else {
+            command_history();
+        }
+    } else if (string_equals_ignore_case(command, "REBOOT")) {
+        if (*arguments != '\0') {
+            terminal_writeline("Usage: REBOOT");
+        } else {
+            command_reboot();
+        }
+    } else if (string_equals_ignore_case(command, "PROMPT")) {
+        command_prompt(arguments);
+    } else if (string_equals_ignore_case(command, "PAUSE")) {
+        if (*arguments != '\0') {
+            terminal_writeline("Usage: PAUSE");
+        } else {
+            command_pause();
+        }
     } else if (string_equals_ignore_case(command, "VER")) {
         command_ver();
     } else if (string_equals_ignore_case(command, "CLS")) {
@@ -969,7 +1302,7 @@ void kernel_main(void)
     keyboard_initialize();
     fs_initialize();
 
-    terminal_writeline("NPT-DOS Build 011");
+    terminal_writeline("NPT-DOS Build 012");
     terminal_writeline("Neptune Corporation");
     terminal_writeline("--------------------------------");
 
@@ -986,7 +1319,8 @@ void kernel_main(void)
     for (;;) {
         size_t length = 0;
 
-        terminal_write("NPT-DOS> ");
+        terminal_write(shell_prompt);
+        terminal_write("> ");
 
         for (;;) {
             char c = keyboard_getchar();
@@ -994,6 +1328,7 @@ void kernel_main(void)
             if (c == '\n') {
                 input[length] = '\0';
                 terminal_writeline("");
+                record_command(input);
                 execute_command(input);
                 break;
             }
