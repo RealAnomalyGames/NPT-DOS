@@ -5,6 +5,8 @@
 #include "ata.h"
 
 #define INPUT_BUFFER_SIZE 128
+#define APPEND_BUFFER_SIZE (FS_CONTENT_MAX + 1)
+#define HEAD_DISPLAY_LENGTH 80
 
 static int string_equals_ignore_case(const char *a, const char *b)
 {
@@ -22,6 +24,44 @@ static int string_equals_ignore_case(const char *a, const char *b)
     }
 
     return *a == '\0' && *b == '\0';
+}
+
+static char to_upper_char(char c)
+{
+    if (c >= 'a' && c <= 'z') {
+        return (char)(c - ('a' - 'A'));
+    }
+
+    return c;
+}
+
+static int find_substring_ignore_case(const char *text,
+                                      const char *search)
+{
+    int position = 0;
+    int offset;
+
+    if (*search == '\0') return 0;
+
+    while (*text != '\0') {
+        offset = 0;
+
+        while (search[offset] != '\0' &&
+               text[offset] != '\0' &&
+               to_upper_char(text[offset]) ==
+               to_upper_char(search[offset])) {
+            offset++;
+        }
+
+        if (search[offset] == '\0') {
+            return position;
+        }
+
+        text++;
+        position++;
+    }
+
+    return -1;
 }
 
 static void print_unsigned(unsigned int value)
@@ -46,7 +86,7 @@ static void print_unsigned(unsigned int value)
 
 static void command_help(void)
 {
-    terminal_writeline("NPT-DOS Build 008 Commands");
+    terminal_writeline("NPT-DOS Build 009 Commands");
     terminal_writeline("--------------------------");
     terminal_writeline("HELP                    List commands");
     terminal_writeline("VER                     Display version");
@@ -59,9 +99,14 @@ static void command_help(void)
     terminal_writeline("WRITE <name> <text>     Write file contents");
     terminal_writeline("TYPE <name>             Display file contents");
     terminal_writeline("DEL <name>              Delete a file");
-    terminal_writeline("COPY <source> <dest>    Copy a file");
+    terminal_writeline("COPY <src> <dest>       Copy a file");
     terminal_writeline("REN <old> <new>         Rename a file");
     terminal_writeline("SIZE <name>             Display file size");
+    terminal_writeline("APPEND <name> <text>    Append text to a file");
+    terminal_writeline("HEAD <name>             Display first 80 characters");
+    terminal_writeline("FIND <name> <text>      Search file contents");
+    terminal_writeline("CLEAR <name>            Empty a file");
+    terminal_writeline("REPLACE <name> <text>   Replace file contents");
     terminal_writeline("FSINFO                  Filesystem information");
     terminal_writeline("FORMAT CONFIRM          Format the NPTFS disk");
     terminal_writeline("");
@@ -70,7 +115,7 @@ static void command_help(void)
 
 static void command_ver(void)
 {
-    terminal_writeline("NPT-DOS Build 008");
+    terminal_writeline("NPT-DOS Build 009");
     terminal_writeline("32-bit x86 operating system");
     terminal_writeline("Neptune Corporation");
 }
@@ -316,6 +361,225 @@ static void command_size(char *arguments)
     terminal_writeline(" bytes");
 }
 
+static void command_append(char *arguments)
+{
+    char *name = take_token(&arguments);
+    char *text = skip_spaces(arguments);
+    const char *contents;
+    char combined[APPEND_BUFFER_SIZE];
+    int existing_size;
+    size_t text_length = 0;
+    size_t total_length;
+    size_t i;
+    int add_separator = 0;
+
+    if (*name == '\0' || *text == '\0') {
+        terminal_writeline("Usage: APPEND <name> <text>");
+        return;
+    }
+
+    if (!fs_is_ready()) {
+        terminal_writeline("Error: No formatted NPTFS disk is ready.");
+        return;
+    }
+
+    existing_size = fs_file_size(name);
+
+    if (existing_size < 0) {
+        terminal_writeline("Error: File not found.");
+        return;
+    }
+
+    contents = fs_read(name);
+
+    if (contents == NULL) {
+        terminal_writeline("Error: File could not be read.");
+        return;
+    }
+
+    /*
+     * Copy fs_read's shared buffer before doing any further
+     * filesystem operations.
+     */
+    for (i = 0; i < (size_t)existing_size; i++) {
+        combined[i] = contents[i];
+    }
+
+    while (text[text_length] != '\0') {
+        text_length++;
+    }
+
+    total_length = (size_t)existing_size;
+
+    if (total_length > 0 && text_length > 0 &&
+        combined[total_length - 1] != ' ' &&
+        combined[total_length - 1] != '\t' &&
+        text[0] != ' ' && text[0] != '\t') {
+        add_separator = 1;
+    }
+
+    if (total_length + (size_t)add_separator + text_length >
+        FS_CONTENT_MAX) {
+        terminal_writeline("Error: Append would exceed 255 bytes.");
+        return;
+    }
+
+    if (add_separator) {
+        combined[total_length++] = ' ';
+    }
+
+    for (i = 0; i < text_length; i++) {
+        combined[total_length++] = text[i];
+    }
+
+    combined[total_length] = '\0';
+
+    report_fs_result(fs_write(name, combined));
+}
+
+static void command_head(char *arguments)
+{
+    char *name = take_token(&arguments);
+    const char *contents;
+    char output[HEAD_DISPLAY_LENGTH + 1];
+    int size;
+    size_t length;
+    size_t i;
+
+    arguments = skip_spaces(arguments);
+
+    if (*name == '\0' || *arguments != '\0') {
+        terminal_writeline("Usage: HEAD <name>");
+        return;
+    }
+
+    if (!fs_is_ready()) {
+        terminal_writeline("Error: No formatted NPTFS disk is ready.");
+        return;
+    }
+
+    size = fs_file_size(name);
+
+    if (size < 0) {
+        terminal_writeline("Error: File not found.");
+        return;
+    }
+
+    contents = fs_read(name);
+
+    if (contents == NULL) {
+        terminal_writeline("Error: File could not be read.");
+        return;
+    }
+
+    length = (size_t)size;
+
+    if (length > HEAD_DISPLAY_LENGTH) {
+        length = HEAD_DISPLAY_LENGTH;
+    }
+
+    for (i = 0; i < length; i++) {
+        output[i] = contents[i];
+    }
+
+    output[length] = '\0';
+
+    terminal_writeline("Beginning of file:");
+    terminal_writeline(output);
+
+    if (size > HEAD_DISPLAY_LENGTH) {
+        terminal_writeline("[Output limited to 80 characters.]");
+    }
+}
+
+static void command_find(char *arguments)
+{
+    char *name = take_token(&arguments);
+    char *search = skip_spaces(arguments);
+    const char *contents;
+    int position;
+
+    if (*name == '\0' || *search == '\0') {
+        terminal_writeline("Usage: FIND <name> <text>");
+        return;
+    }
+
+    if (!fs_is_ready()) {
+        terminal_writeline("Error: No formatted NPTFS disk is ready.");
+        return;
+    }
+
+    contents = fs_read(name);
+
+    if (contents == NULL) {
+        terminal_writeline("Error: File could not be read.");
+        return;
+    }
+
+    position = find_substring_ignore_case(contents, search);
+
+    if (position < 0) {
+        terminal_writeline("Text not found.");
+    } else {
+        terminal_write("Text found at character position: ");
+        print_unsigned((unsigned int)(position + 1));
+        terminal_writeline("");
+    }
+}
+
+static void command_clear(char *arguments)
+{
+    char *name = take_token(&arguments);
+    int size;
+
+    arguments = skip_spaces(arguments);
+
+    if (*name == '\0' || *arguments != '\0') {
+        terminal_writeline("Usage: CLEAR <name>");
+        return;
+    }
+
+    if (!fs_is_ready()) {
+        terminal_writeline("Error: No formatted NPTFS disk is ready.");
+        return;
+    }
+
+    size = fs_file_size(name);
+
+    if (size < 0) {
+        terminal_writeline("Error: File not found.");
+        return;
+    }
+
+    report_fs_result(fs_write(name, ""));
+}
+
+static void command_replace(char *arguments)
+{
+    char *name = take_token(&arguments);
+    char *text = skip_spaces(arguments);
+    int size;
+
+    if (*name == '\0' || *text == '\0') {
+        terminal_writeline("Usage: REPLACE <name> <text>");
+        return;
+    }
+
+    if (!fs_is_ready()) {
+        terminal_writeline("Error: No formatted NPTFS disk is ready.");
+        return;
+    }
+
+    size = fs_file_size(name);
+
+    if (size < 0) {
+        terminal_writeline("Error: File not found.");
+        return;
+    }
+
+    report_fs_result(fs_write(name, text));
+}
+
 static void execute_command(char *line)
 {
     char *arguments = skip_spaces(line);
@@ -422,6 +686,21 @@ static void execute_command(char *line)
     } else if (string_equals_ignore_case(command, "SIZE")) {
         command_size(arguments);
 
+    } else if (string_equals_ignore_case(command, "APPEND")) {
+        command_append(arguments);
+
+    } else if (string_equals_ignore_case(command, "HEAD")) {
+        command_head(arguments);
+
+    } else if (string_equals_ignore_case(command, "FIND")) {
+        command_find(arguments);
+
+    } else if (string_equals_ignore_case(command, "CLEAR")) {
+        command_clear(arguments);
+
+    } else if (string_equals_ignore_case(command, "REPLACE")) {
+        command_replace(arguments);
+
     } else if (string_equals_ignore_case(command, "FORMAT")) {
         if (!string_equals_ignore_case(arguments, "CONFIRM")) {
             terminal_writeline("Formatting erases all NPTFS files.");
@@ -457,7 +736,7 @@ void kernel_main(void)
     keyboard_initialize();
     fs_initialize();
 
-    terminal_writeline("NPT-DOS Build 008");
+    terminal_writeline("NPT-DOS Build 009");
     terminal_writeline("Neptune Corporation");
     terminal_writeline("--------------------------------");
 
