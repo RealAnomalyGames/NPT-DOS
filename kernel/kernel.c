@@ -1389,11 +1389,13 @@ void kernel_main(void)
     timer_initialize();
     keyboard_initialize();
 
-    if (!setup_run()) {
-        for (;;) {
-            __asm__ volatile ("cli; hlt");
+    #ifndef NPT_INSTALLED_BUILD
+        if (!setup_run()) {
+            for (;;) {
+                __asm__ volatile ("cli; hlt");
+            }
         }
-    }
+    #endif
 
     fs_initialize();
 
