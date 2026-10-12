@@ -216,6 +216,7 @@ static void command_help(char *arguments)
         terminal_writeline("REPLACE <name> <text>   Replace file contents");
         terminal_writeline("ATTRIB <name> [+/-RHS]  View or change attributes");
         terminal_writeline("DISKINFO                Disk/filesystem details");
+        terminal_writeline("DISKID                  Display ATA model and capacity");
         terminal_writeline("FREE                    Available storage");
         terminal_writeline("FSINFO                  Filesystem information");
         terminal_writeline("FORMAT CONFIRM          Format the NPTFS disk");
@@ -339,6 +340,9 @@ static void command_help(char *arguments)
     } else if (string_equals_ignore_case(topic, "EXIT")) {
         terminal_writeline("EXIT");
         terminal_writeline("Explains why there is no host prompt to return to.");
+    } else if (string_equals_ignore_case(topic, "DISKID")) {
+        terminal_writeline("DISKID");
+        terminal_writeline("Display primary-master ATA model and capacity");
     } else {
         terminal_write("No detailed help available for: ");
         terminal_writeline(topic);
@@ -1367,6 +1371,9 @@ static void execute_command(char *line)
     } else if (string_equals_ignore_case(command, "TIME")) {
         if (*arguments != '\0') terminal_writeline("Usage: TIME");
         else command_time();
+    else if (strcmp(input, "DISKID") == 0) {
+        command_diskid();
+    }
     } else {
         terminal_write("Unknown command: ");
         terminal_writeline(command);
