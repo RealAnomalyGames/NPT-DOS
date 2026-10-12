@@ -1,7 +1,7 @@
 BUILD_DIR := build
 ISO_DIR := $(BUILD_DIR)/iso
 KERNEL := $(BUILD_DIR)/kernel.elf
-ISO := $(BUILD_DIR)/npt-dos-build-012.iso
+ISO := $(BUILD_DIR)/npt-dos-build-013.iso
 
 CC := gcc
 LD := ld
