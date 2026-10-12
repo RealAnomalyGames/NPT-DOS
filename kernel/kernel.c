@@ -6,6 +6,7 @@
 #include "ata.h"
 #include "timer.h"
 #include "rtc.h"
+#include "setup.h"
 
 #define INPUT_BUFFER_SIZE 128
 #define APPEND_BUFFER_SIZE (FS_CONTENT_MAX + 1)
@@ -1300,9 +1301,16 @@ void kernel_main(void)
     terminal_initialize();
     timer_initialize();
     keyboard_initialize();
+
+    if (!setup_run()) {
+        for (;;) {
+            __asm__ volatile ("cli; hlt");
+        }
+    }
+
     fs_initialize();
 
-    terminal_writeline("NPT-DOS Build 012");
+    terminal_writeline("NPT-DOS Build 013");
     terminal_writeline("Neptune Corporation");
     terminal_writeline("--------------------------------");
 
