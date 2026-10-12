@@ -1,4 +1,4 @@
-name: NPT-DOS Build 011
+name: NPT-DOS Build 012
 
 on:
   push:
@@ -39,19 +39,19 @@ jobs:
 
       - name: Verify ISO exists
         run: |
-          test -s build/npt-dos-build-011.iso
-          file build/npt-dos-build-011.iso
-          ls -lh build/npt-dos-build-011.iso
+          test -s build/npt-dos-build-012.iso
+          file build/npt-dos-build-012.iso
+          ls -lh build/npt-dos-build-012.iso
 
       - name: Generate ISO SHA-256 checksum
         run: |
-          sha256sum build/npt-dos-build-011.iso > build/npt-dos-build-011.iso.sha256
-          cat build/npt-dos-build-011.iso.sha256
+          sha256sum build/npt-dos-build-012.iso > build/npt-dos-build-012.iso.sha256
+          cat build/npt-dos-build-012.iso.sha256
 
       - name: Upload bootable ISO
         uses: actions/upload-artifact@v4
         with:
-          name: npt-dos-build-011
+          name: npt-dos-build-012
           path: |
-            build/npt-dos-build-011.iso
-            build/npt-dos-build-011.iso.sha256
+            build/npt-dos-build-012.iso
+            build/npt-dos-build-012.iso.sha256
