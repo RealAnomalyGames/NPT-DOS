@@ -417,6 +417,58 @@ int fs_file_size(const char *name)
     return (int)entry[17] | ((int)entry[18] << 8);
 }
 
+
+fs_result_t fs_rename(const char *old_name, const char *new_name)
+{
+    int old_index;
+    int new_index;
+    uint8_t *entry;
+    uint8_t old_name_bytes[FS_NAME_MAX + 1];
+    size_t i;
+    fs_result_t result;
+
+    if (!filesystem_ready) return FS_NOT_READY;
+    if (!valid_name(old_name) || !valid_name(new_name)) {
+        return FS_INVALID_NAME;
+    }
+
+    old_index = find_file(old_name);
+
+    if (old_index < 0) return FS_NOT_FOUND;
+
+    new_index = find_file(new_name);
+
+    if (new_index >= 0 && new_index != old_index) {
+        return FS_ALREADY_EXISTS;
+    }
+
+    entry = entry_at(old_index);
+
+    for (i = 0; i < FS_NAME_MAX + 1; i++) {
+        old_name_bytes[i] = entry[1 + i];
+    }
+
+    for (i = 0; i < FS_NAME_MAX + 1; i++) {
+        entry[1 + i] = 0;
+    }
+
+    for (i = 0; new_name[i] != '\0'; i++) {
+        entry[1 + i] = (uint8_t)new_name[i];
+    }
+
+    result = save_directory();
+
+    if (result != FS_OK) {
+        for (i = 0; i < FS_NAME_MAX + 1; i++) {
+            entry[1 + i] = old_name_bytes[i];
+        }
+
+        return result;
+    }
+
+    return FS_OK;
+}
+
 int fs_get_attributes(const char *name)
 {
     int index;
@@ -427,11 +479,9 @@ int fs_get_attributes(const char *name)
 
     index = find_file(name);
 
-    if (index < 0) {
-        return -1;
-    }
+    if (index < 0) return -1;
 
-    return (int)entry_at(index)[19];
+    return (int)entry_at(index)[19] & FS_ATTR_MASK;
 }
 
 fs_result_t fs_set_attributes(const char *name, int attributes)
@@ -455,11 +505,6 @@ fs_result_t fs_set_attributes(const char *name, int attributes)
 
     entry = entry_at(index);
     previous = entry[19];
-
-    /*
-     * Attribute changes are allowed even when a file is
-     * read-only, so its owner can remove the R attribute.
-     */
     entry[19] = (uint8_t)attributes;
 
     result = save_directory();
