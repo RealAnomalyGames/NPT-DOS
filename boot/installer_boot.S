@@ -1,13 +1,12 @@
 /*
  * NPT-DOS Build 014-E
- * BIOS hard-disk boot sector
+ * BIOS boot sector
  *
- * Build as a raw 512-byte boot sector.
- * Second-stage loader: LBA 32, 16 sectors.
+ * Loaded by BIOS at physical address 0x7C00.
+ * Loads 16 sectors from LBA 32 to physical 0x8000.
  *
- * IMPORTANT:
- * This is a boot-sector source file, not yet an
- * integrated or tested installer.
+ * Handoff contract:
+ *   Physical address 0x0500 contains the BIOS boot drive.
  */
 
 .section .text
@@ -16,35 +15,33 @@
 
 _start:
     cli
+
     xorw %ax, %ax
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %ss
-    movw $0x7C00, %sp
-    sti
+    movw $0x7000, %sp
 
-    /* Preserve BIOS boot drive. */
-    movb %dl, boot_drive
-
-    /* Normalize CS with a far jump. */
+    /* Normalize CS to 0000 before using absolute addresses. */
     ljmp $0x0000, $normalized
 
 normalized:
-    movw $0x0000, %ax
-    movw %ax, %ds
-    movw %ax, %es
+    cld
+
+    /* Preserve the BIOS-provided drive number at physical 0x0500. */
+    movb %dl, 0x0500
 
     movw $loading_message, %si
     call print_string
 
-    /* Read 16 sectors from LBA 32 to 0000:8000. */
-    movb boot_drive, %dl
+    /* BIOS INT 13h extensions: read LBA 32, 16 sectors to 0000:8000. */
     movw $dap, %si
+    movb 0x0500, %dl
     movb $0x42, %ah
     int $0x13
     jc disk_error
 
-    /* Transfer control to the second-stage loader. */
+    /* Continue execution in the second stage. */
     ljmp $0x0000, $0x8000
 
 disk_error:
@@ -60,6 +57,7 @@ print_string:
     lodsb
     testb %al, %al
     jz print_done
+
     movb $0x0E, %ah
     movb $0x07, %bh
     int $0x10
@@ -68,23 +66,22 @@ print_string:
 print_done:
     ret
 
-boot_drive:
-    .byte 0
-
 loading_message:
-    .asciz "NPT-DOS: Loading system...\r\n"
+    .ascii "NPT-DOS: Loading system..."
+    .byte 13, 10, 0
 
 error_message:
-    .asciz "NPT-DOS: Disk read failed.\r\n"
+    .ascii "NPT-DOS: Disk read failed."
+    .byte 13, 10, 0
 
 .align 4
 dap:
-    .byte 0x10       /* DAP size */
-    .byte 0x00       /* Reserved */
-    .word 16         /* Sector count */
-    .word 0x8000     /* Destination offset */
-    .word 0x0000     /* Destination segment */
-    .quad 32         /* Starting LBA */
+    .byte 0x10
+    .byte 0x00
+    .word 16
+    .word 0x8000
+    .word 0x0000
+    .quad 32
 
 .org 510
 .word 0xAA55
