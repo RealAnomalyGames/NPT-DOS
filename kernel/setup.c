@@ -33,7 +33,7 @@ static void setup_draw_screen(void)
     terminal_clear();
 
     terminal_writeline("================================================");
-    terminal_writeline("                 NPT-DOS SETUP                  ");
+    terminal_writeline("                  NPT-DOS SETUP                 ");
     terminal_writeline("               Neptune Corporation              ");
     terminal_writeline("================================================");
     terminal_writeline("");
@@ -314,8 +314,8 @@ static void installer_install_target(
     terminal_writeline("INSTALLATION COMPLETED.");
     terminal_writeline("All written sectors passed read-back verification.");
     terminal_writeline("");
-    terminal_writeline("Power off the VM, detach the installer ISO,");
-    terminal_writeline("and boot from the installed virtual hard disk.");
+    terminal_writeline("Power off your computer, detach the installer ISO,");
+    terminal_writeline("and boot from the installed hard disk.");
 
     for (;;) {
         __asm__ volatile ("cli; hlt");
