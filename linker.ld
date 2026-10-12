@@ -1,3 +1,4 @@
+
 ENTRY(_start)
 
 SECTIONS
@@ -22,8 +23,11 @@ SECTIONS
 
     .bss ALIGN(4K) :
     {
+        __bss_start = .;
         *(COMMON)
         *(.bss*)
+        . = ALIGN(16);
+        __bss_end = .;
     }
 
     /DISCARD/ :
