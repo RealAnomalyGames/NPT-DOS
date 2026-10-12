@@ -16,7 +16,7 @@ stack_bottom:
 .skip 16384
 stack_top:
 
-.section .text
+.section .text.boot
 .global _start
 .type _start, @function
 
