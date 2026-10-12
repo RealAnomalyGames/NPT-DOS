@@ -1371,8 +1371,9 @@ static void execute_command(char *line)
     } else if (string_equals_ignore_case(command, "TIME")) {
         if (*arguments != '\0') terminal_writeline("Usage: TIME");
         else command_time();
-    else if (strcmp(input, "DISKID") == 0) {
-        command_diskid();
+    } else if (string_equals_ignore_case(command, "DISKID")) {
+        if (*arguments != '\0') terminal_writeline("Usage: DISKID");
+        else command_diskid();
     }
     } else {
         terminal_write("Unknown command: ");
