@@ -332,7 +332,7 @@ static int installer_write_verified_sector(
         return 0;
     }
 
-    if (!ata_read_sector_at(device, lba, verify)) {
+    if (!storage_read_sector(device, lba, verify)) {
         terminal_write("READ-BACK FAILED at LBA ");
         setup_print_u32(lba);
         terminal_writeline("");
