@@ -780,6 +780,51 @@ static void command_print_u64(uint64_t value)
     }
 }
 
+static uint32_t u64_to_decimal(
+    uint64_t value,
+    char *out,
+    uint32_t out_size
+) {
+    char reversed[20];
+    uint32_t digits = 0;
+    uint32_t written = 0;
+
+    if (out == 0 || out_size == 0) {
+        return 0;
+    }
+
+    do {
+        uint64_t quotient = 0;
+        uint32_t remainder = 0;
+        int bit;
+
+        /*
+         * Divide by 10 using binary long division.
+         * This avoids 64-bit / and % operations.
+         */
+        for (bit = 63; bit >= 0; bit--) {
+            remainder = (remainder << 1)
+                      | (uint32_t)((value >> bit) & 1U);
+
+            if (remainder >= 10U) {
+                remainder -= 10U;
+                quotient |= ((uint64_t)1 << bit);
+            }
+        }
+
+        reversed[digits++] = (char)('0' + remainder);
+        value = quotient;
+
+    } while (value != 0 && digits < sizeof(reversed));
+
+    while (digits > 0 && written + 1 < out_size) {
+        out[written++] = reversed[--digits];
+    }
+
+    out[written] = '\0';
+    return written;
+}
+
 static void command_disks(void)
 {
     uint32_t count = storage_device_count();
