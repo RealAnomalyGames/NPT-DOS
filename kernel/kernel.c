@@ -7,6 +7,7 @@
 #include "timer.h"
 #include "rtc.h"
 #include "setup.h"
+#include "pci.h"
 
 #define INPUT_BUFFER_SIZE 128
 #define APPEND_BUFFER_SIZE (FS_CONTENT_MAX + 1)
@@ -1397,6 +1398,7 @@ void kernel_main(void)
     #endif
 
     fs_initialize();
+    pci_initialize();
 
     terminal_writeline("NPT-DOS 1.01");
     terminal_writeline("Neptune Corporation");
