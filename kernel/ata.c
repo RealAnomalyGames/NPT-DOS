@@ -562,11 +562,12 @@ int storage_initialize(void)
     storage_ready = 0;
     storage_detected_count = 0;
 
-    /*
-     * Refresh the legacy IDE discovery state.
-     * SATA devices remain available even if no IDE disk exists.
-     */
     (void)ata_initialize();
+
+    /* Enable enumeration before calling the helper below. */
+    storage_ready = 1;
+
+    /* Existing IDE and SATA enumeration loops go here. */
 
     for (i = 0; i < STORAGE_IDE_DEVICE_COUNT; ++i) {
         ata_device_info_t ide_info;
@@ -598,7 +599,6 @@ int storage_initialize(void)
         }
     }
 
-    storage_ready = 1;
     return storage_detected_count != 0;
 }
 
