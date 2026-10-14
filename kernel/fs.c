@@ -14,7 +14,6 @@ static uint8_t sector_buffer[SECTOR_SIZE];
 static uint32_t filesystem_device_id = 0xFFFFFFFFU;
 static char read_buffer[FS_CONTENT_MAX + 1];
 static int filesystem_ready;
-static int disk_available;
 
 static void clear_buffer(uint8_t *buffer)
 {
