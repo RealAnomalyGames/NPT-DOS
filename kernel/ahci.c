@@ -866,6 +866,19 @@ int ahci_initialize(void)
 
             if (signature == SATA_SIG_ATA) {
                 port->device_type = AHCI_DEVICE_SATA;
+
+                /*
+                 * Identify the disk immediately so the shared
+                 * storage API has its model and sector capacity.
+                 */
+                if (!ahci_identify_device(
+                        controller_count, port_number)) {
+                    terminal_write(
+                        "AHCI: SATA disk identification failed on port ");
+                    terminal_putchar(
+                        (char)('0' + (port_number % 10u)));
+                    terminal_putchar('\n');
+                }
             } else if (signature == SATA_SIG_ATAPI) {
                 port->device_type = AHCI_DEVICE_ATAPI;
             } else if (signature == SATA_SIG_SEMB) {
