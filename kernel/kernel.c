@@ -737,6 +737,49 @@ static void command_diskid(void)
     terminal_writeline("Disk writes:          None by this command");
 }
 
+static void command_print_u64(uint64_t value)
+{
+    char digits[20];
+    unsigned int count = 0;
+
+    if (value == 0) {
+        terminal_write("0");
+        return;
+    }
+
+    /*
+     * Divide using 32-bit chunks so this does not require
+     * the compiler's 64-bit division runtime helper.
+     */
+    while (value >= 10) {
+        uint64_t quotient = 0;
+        uint32_t remainder = 0;
+        int bit;
+
+        for (bit = 63; bit >= 0; bit--) {
+            remainder = (remainder << 1) |
+                (uint32_t)((value >> bit) & 1U);
+
+            if (remainder >= 10) {
+                remainder -= 10;
+                quotient |= ((uint64_t)1 << bit);
+            }
+        }
+
+        digits[count++] = (char)('0' + remainder);
+        value = quotient;
+    }
+
+    digits[count++] = (char)('0' + (uint32_t)value);
+
+    while (count > 0) {
+        char character[2];
+        character[0] = digits[--count];
+        character[1] = '\0';
+        terminal_write(character);
+    }
+}
+
 static void command_disks(void)
 {
     uint32_t count = storage_device_count();
@@ -808,20 +851,7 @@ static void command_disks(void)
         }
 
         /* Convert the 64-bit sector count to decimal. */
-        value = info.sector_count;
-        {
-            char reversed[20];
-            uint32_t digits = 0;
-
-            do {
-                reversed[digits++] = (char)('0' + value % 10U);
-                value /= 10U;
-            } while (value != 0 && digits < sizeof(reversed));
-
-            while (digits > 0 && n < sizeof(line) - 1) {
-                line[n++] = reversed[--digits];
-            }
-        }
+        command_print_u64(info.sector_count);
 
         {
             const char suffix[] = " sectors";
