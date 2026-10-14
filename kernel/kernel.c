@@ -1382,6 +1382,7 @@ static void execute_command(char *line)
     }
 }
 
+
 void kernel_main(void)
 {
     char input[INPUT_BUFFER_SIZE];
@@ -1389,6 +1390,13 @@ void kernel_main(void)
     terminal_initialize();
     timer_initialize();
     keyboard_initialize();
+
+    /*
+     * Discover storage controllers before Setup starts.
+     * AHCI discovery must remain read-only at this stage.
+     */
+    pci_initialize();
+    ahci_initialize();
 
     #ifndef NPT_INSTALLED_BUILD
         if (!setup_run()) {
@@ -1399,8 +1407,6 @@ void kernel_main(void)
     #endif
 
     fs_initialize();
-    pci_initialize();
-    ahci_initialize();
 
     terminal_writeline("NPT-DOS 1.01");
     terminal_writeline("Neptune Corporation");
@@ -1410,7 +1416,7 @@ void kernel_main(void)
         terminal_writeline("NPTFS persistent storage initialized.");
     } else {
         terminal_writeline("NPTFS is not formatted or unavailable.");
-        terminal_writeline("Use FORMAT CONFIRM on the dedicated test disk.");
+        terminal_writeline("Use FORMAT CONFIRM on the dedicated hard disk.");
     }
 
     terminal_writeline("Type HELP to list commands.");
