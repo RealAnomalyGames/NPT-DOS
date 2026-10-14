@@ -39,6 +39,7 @@ COMMON_OBJECTS := \
 	$(BUILD_DIR)/keyboard.o \
 	$(BUILD_DIR)/fs.o \
 	$(BUILD_DIR)/ata.o \
+	$(BUILD_DIR)/pci.o \
 	$(BUILD_DIR)/timer.o \
 	$(BUILD_DIR)/rtc.o
 
@@ -96,6 +97,9 @@ $(BUILD_DIR)/timer.o: kernel/timer.c kernel/timer.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/rtc.o: kernel/rtc.c kernel/rtc.h | $(BUILD_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/pci.o: kernel/pci.c kernel/pci.h kernel/terminal.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/setup.o: kernel/setup.c \
