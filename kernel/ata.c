@@ -1,7 +1,8 @@
+#include <stdint.h>
+#include "ata.h"
 
 #define ATA_PRIMARY_IO       0x1F0
 #define ATA_PRIMARY_CTRL     0x3F6
-
 #define ATA_SECONDARY_IO     0x170
 #define ATA_SECONDARY_CTRL   0x376
 
@@ -33,9 +34,9 @@ typedef struct {
     uint16_t io_base;
     uint16_t ctrl_base;
     uint8_t slave;
-} ata_channel_device_t;
+} ata_device_t;
 
-static const ata_channel_device_t ata_devices[ATA_MAX_DEVICES] = {
+static const ata_device_t ata_devices[ATA_MAX_DEVICES] = {
     { ATA_PRIMARY_IO,   ATA_PRIMARY_CTRL,   0 },
     { ATA_PRIMARY_IO,   ATA_PRIMARY_CTRL,   1 },
     { ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, 0 },
@@ -44,8 +45,7 @@ static const ata_channel_device_t ata_devices[ATA_MAX_DEVICES] = {
 
 static ata_device_info_t ata_info[ATA_MAX_DEVICES];
 static uint32_t ata_detected_count;
-
-static int ata_ready = 0;
+static int ata_ready;
 
 static inline void outb(uint16_t port, uint8_t value)
 {
@@ -71,76 +71,85 @@ static inline void outw(uint16_t port, uint16_t value)
     __asm__ volatile ("outw %0, %1" : : "a"(value), "Nd"(port));
 }
 
-static void ata_delay_400ns(void)
+static uint8_t ata_read_reg(const ata_device_t *dev, uint8_t reg)
 {
-    (void)inb(ATA_ALTSTATUS);
-    (void)inb(ATA_ALTSTATUS);
-    (void)inb(ATA_ALTSTATUS);
-    (void)inb(ATA_ALTSTATUS);
+    return inb((uint16_t)(dev->io_base + reg));
 }
 
-/* Wait until the selected device is no longer busy. */
-static int ata_wait(int require_drq)
+static void ata_write_reg(
+    const ata_device_t *dev,
+    uint8_t reg,
+    uint8_t value)
 {
-    uint32_t timeout;
-
-    for (timeout = 0; timeout < ATA_TIMEOUT; timeout++) {
-        uint8_t status = inb(ATA_STATUS);
-
-        if (status == 0x00 || status == 0xFF) {
-            return 0;
-        }
-
-        if (status & ATA_SR_BSY) {
-            continue;
-        }
-
-        if (status & (ATA_SR_ERR | ATA_SR_DF)) {
-            return 0;
-        }
-
-        if (!require_drq || (status & ATA_SR_DRQ)) {
-            return 1;
-        }
-    }
-
-    return 0;
+    outb((uint16_t)(dev->io_base + reg), value);
 }
 
-/* Wait for a command's data phase to finish. */
-static int ata_wait_complete(void)
+static void ata_delay_400ns(const ata_device_t *dev)
 {
-    uint32_t timeout;
-
-    for (timeout = 0; timeout < ATA_TIMEOUT; timeout++) {
-        uint8_t status = inb(ATA_STATUS);
-
-        if (status == 0x00 || status == 0xFF) {
-            return 0;
-        }
-
-        if (status & ATA_SR_BSY) {
-            continue;
-        }
-
-        if (status & (ATA_SR_ERR | ATA_SR_DF)) {
-            return 0;
-        }
-
-        if (!(status & ATA_SR_DRQ)) {
-            return 1;
-        }
-    }
-
-    return 0;
+    (void)inb(dev->ctrl_base);
+    (void)inb(dev->ctrl_base);
+    (void)inb(dev->ctrl_base);
+    (void)inb(dev->ctrl_base);
 }
 
 /*
- * Decode ATA IDENTIFY words 27-46.
- * ATA stores two model characters per word, with the high byte first
- * in the logical model string.
+ * Wait for BSY to clear.
+ * If require_drq is nonzero, also wait for DRQ.
  */
-static void ata_decode_model(const uint16_t *identify)
+static int ata_wait(
+    const ata_device_t *dev,
+    int require_drq)
+{
+    uint32_t timeout;
+
+    for (timeout = 0; timeout < ATA_TIMEOUT; timeout++) {
+        uint8_t status =
+            ata_read_reg(dev, ATA_REG_STATUS);
+
+        if (status == 0x00 || status == 0xFF)
+            return 0;
+
+        if (status & ATA_SR_BSY)
+            continue;
+
+        if (status & (ATA_SR_ERR | ATA_SR_DF))
+            return 0;
+
+        if (!require_drq || (status & ATA_SR_DRQ))
+            return 1;
+    }
+
+    return 0;
+}
+
+/* Wait until a command's data phase is complete. */
+static int ata_wait_complete(const ata_device_t *dev)
+{
+    uint32_t timeout;
+
+    for (timeout = 0; timeout < ATA_TIMEOUT; timeout++) {
+        uint8_t status =
+            ata_read_reg(dev, ATA_REG_STATUS);
+
+        if (status == 0x00 || status == 0xFF)
+            return 0;
+
+        if (status & ATA_SR_BSY)
+            continue;
+
+        if (status & (ATA_SR_ERR | ATA_SR_DF))
+            return 0;
+
+        if (!(status & ATA_SR_DRQ))
+            return 1;
+    }
+
+    return 0;
+}
+
+static void ata_decode_model(
+    const uint16_t *identify,
+    ata_device_info_t *info)
 {
     uint32_t i;
     uint32_t length = 40;
@@ -148,273 +157,161 @@ static void ata_decode_model(const uint16_t *identify)
     for (i = 0; i < 20; i++) {
         uint16_t word = identify[27 + i];
 
-        ata_info.model[i * 2] = (char)(word >> 8);
-        ata_info.model[i * 2 + 1] = (char)(word & 0xFF);
+        info->model[i * 2] =
+            (char)(word >> 8);
+
+        info->model[i * 2 + 1] =
+            (char)(word & 0xFF);
     }
 
-    ata_info.model[40] = '\0';
+    info->model[40] = '\0';
 
-    /* Remove trailing spaces from the fixed-width model field. */
-    while (length > 0 && ata_info.model[length - 1] == ' ') {
+    while (length > 0 &&
+           info->model[length - 1] == ' ') {
         length--;
     }
 
-    ata_info.model[length] = '\0';
+    info->model[length] = '\0';
 }
 
-/* Cache the IDENTIFY information needed by NPT-DOS. */
-static void ata_decode_identify(const uint16_t *identify)
+static void ata_decode_identify(
+    uint32_t device,
+    const uint16_t *identify)
 {
     uint32_t sectors;
+    ata_device_info_t *info = &ata_info[device];
 
-    ata_decode_model(identify);
+    ata_decode_model(identify, info);
 
     sectors = (uint32_t)identify[60]
             | ((uint32_t)identify[61] << 16);
 
-    ata_info.lba28_sectors = sectors;
+    info->lba28_sectors = sectors;
 
-    if (sectors > ATA_MAX_SECTORS) {
+    if (sectors > ATA_MAX_SECTORS)
         sectors = ATA_MAX_SECTORS;
+
+    info->addressable_sectors = sectors;
+    info->detected = 1;
+}
+
+/*
+ * Probe one legacy IDE position using IDENTIFY DEVICE.
+ * This routine does not write any disk sectors.
+ */
+static int ata_probe_device(uint32_t device)
+{
+    const ata_device_t *dev = &ata_devices[device];
+    uint16_t identify[256];
+    uint32_t i;
+    uint32_t timeout;
+    uint8_t status;
+
+    /*
+     * Select master/slave. Bit 7 is set for the ATA
+     * device/head register selection pattern.
+     */
+    ata_write_reg(
+        dev,
+        ATA_REG_DRIVE,
+        (uint8_t)(0xA0 | (dev->slave << 4)));
+
+    ata_delay_400ns(dev);
+
+    status = ata_read_reg(dev, ATA_REG_STATUS);
+
+    if (status == 0x00 || status == 0xFF)
+        return 0;
+
+    if (!ata_wait(dev, 0))
+        return 0;
+
+    /* IDENTIFY DEVICE requires zero in these registers. */
+    ata_write_reg(dev, ATA_REG_SECCOUNT, 0);
+    ata_write_reg(dev, ATA_REG_LBA0, 0);
+    ata_write_reg(dev, ATA_REG_LBA1, 0);
+    ata_write_reg(dev, ATA_REG_LBA2, 0);
+
+    ata_write_reg(dev, ATA_REG_COMMAND, ATA_CMD_IDENTIFY);
+    ata_delay_400ns(dev);
+
+    status = ata_read_reg(dev, ATA_REG_STATUS);
+
+    if (status == 0x00 || status == 0xFF)
+        return 0;
+
+    /*
+     * IDENTIFY may initially report BSY.
+     * Wait for a data phase, rejecting devices that
+     * report errors or never provide identification data.
+     */
+    for (timeout = 0; timeout < ATA_TIMEOUT; timeout++) {
+        status = ata_read_reg(dev, ATA_REG_STATUS);
+
+        if (status == 0x00 || status == 0xFF)
+            return 0;
+
+        if (status & ATA_SR_BSY)
+            continue;
+
+        if (status & (ATA_SR_ERR | ATA_SR_DF))
+            return 0;
+
+        /*
+         * ATAPI devices have a different IDENTIFY command.
+         * This initial driver supports ATA disks only.
+         */
+        if (ata_read_reg(dev, ATA_REG_LBA1) != 0 ||
+            ata_read_reg(dev, ATA_REG_LBA2) != 0)
+            return 0;
+
+        if (!(status & ATA_SR_DRQ))
+            return 0;
+
+        break;
     }
 
-    ata_info.addressable_sectors = sectors;
-    ata_info.detected = 1;
+    if (timeout == ATA_TIMEOUT)
+        return 0;
+
+    for (i = 0; i < 256; i++)
+        identify[i] = inw(dev->io_base + ATA_REG_DATA);
+
+    ata_delay_400ns(dev);
+
+    if (!ata_wait_complete(dev))
+        return 0;
+
+    ata_decode_identify(device, identify);
+    return 1;
 }
 
-static uint8_t ata_read_reg(
-    const ata_channel_device_t *dev,
-    uint8_t reg)
-{
-    return inb((uint16_t)(dev->io_base + reg));
-}
-
-static void ata_write_reg(
-    const ata_channel_device_t *dev,
-    uint8_t reg,
-    uint8_t value)
-{
-    outb((uint16_t)(dev->io_base + reg), value);
-}
-
-static void ata_delay_400ns(
-    const ata_channel_device_t *dev)
-{
-    (void)inb(dev->ctrl_base);
-    (void)inb(dev->ctrl_base);
-    (void)inb(dev->ctrl_base);
-    (void)inb(dev->ctrl_base);
-}
 /*
- * Initialize the primary-master ATA device and cache its IDENTIFY data.
- * This function reads device information but does not write disk sectors.
+ * Probe all four legacy IDE positions.
+ * Returns 1 if at least one ATA device is detected.
  */
 int ata_initialize(void)
 {
-    uint32_t timeout;
-    uint8_t status;
     uint32_t i;
-    uint16_t identify[256];
 
     ata_ready = 0;
-    ata_info.detected = 0;
-    ata_info.model[0] = '\0';
-    ata_info.lba28_sectors = 0;
-    ata_info.addressable_sectors = 0;
+    ata_detected_count = 0;
 
-    /* Select the primary master for IDENTIFY. */
-    outb(ATA_DRIVE, 0xA0);
-    ata_delay_400ns();
-
-    status = inb(ATA_STATUS);
-
-    if (status == 0x00 || status == 0xFF) {
-        return 0;
+    for (i = 0; i < ATA_MAX_DEVICES; i++) {
+        ata_info[i].detected = 0;
+        ata_info[i].model[0] = '\0';
+        ata_info[i].lba28_sectors = 0;
+        ata_info[i].addressable_sectors = 0;
     }
 
-    /* Wait for the selected device to finish any pending operation. */
-    for (timeout = 0; timeout < ATA_TIMEOUT; timeout++) {
-        status = inb(ATA_STATUS);
-
-        if (status == 0x00 || status == 0xFF) {
-            return 0;
-        }
-
-        if (!(status & ATA_SR_BSY)) {
-            break;
-        }
+    for (i = 0; i < ATA_MAX_DEVICES; i++) {
+        if (ata_probe_device(i))
+            ata_detected_count++;
     }
 
-    if (timeout == ATA_TIMEOUT) {
-        return 0;
-    }
-
-    /* IDENTIFY requires these registers to be zero. */
-    outb(ATA_SECCOUNT, 0);
-    outb(ATA_LBA0, 0);
-    outb(ATA_LBA1, 0);
-    outb(ATA_LBA2, 0);
-
-    outb(ATA_COMMAND, ATA_CMD_IDENTIFY);
-    ata_delay_400ns();
-
-    status = inb(ATA_STATUS);
-
-    if (status == 0x00 || status == 0xFF) {
-        return 0;
-    }
-
-    /* Wait for IDENTIFY to finish its busy phase. */
-    for (timeout = 0; timeout < ATA_TIMEOUT; timeout++) {
-        status = inb(ATA_STATUS);
-
-        if (status == 0x00 || status == 0xFF) {
-            return 0;
-        }
-
-        if (!(status & ATA_SR_BSY)) {
-            break;
-        }
-    }
-
-    if (timeout == ATA_TIMEOUT) {
-        return 0;
-    }
-
-    /* Nonzero LBA1/LBA2 indicates a non-ATA device signature. */
-    if (inb(ATA_LBA1) != 0 || inb(ATA_LBA2) != 0) {
-        return 0;
-    }
-
-    if (status & (ATA_SR_ERR | ATA_SR_DF)) {
-        return 0;
-    }
-
-    if (!(status & ATA_SR_DRQ)) {
-        return 0;
-    }
-
-    /* Save all 256 words from the 512-byte IDENTIFY response. */
-    for (i = 0; i < 256; i++) {
-        identify[i] = inw(ATA_DATA);
-    }
-
-    ata_delay_400ns();
-
-    if (!ata_wait_complete()) {
-        return 0;
-    }
-
-    /* Select the master again in 28-bit LBA mode. */
-    outb(ATA_DRIVE, 0xE0);
-    ata_delay_400ns();
-
-    if (!ata_wait(0)) {
-        return 0;
-    }
-
-    ata_decode_identify(identify);
-
-    ata_ready = 1;
-    return 1;
+    ata_ready = (ata_detected_count != 0);
+    return ata_ready;
 }
-
-/*
- * Copy cached device information to the caller.
- * Returns 1 when information is available, otherwise 0.
- */
-int ata_get_device_info(ata_device_info_t *info)
-{
-    uint32_t i;
-
-    if (info == 0 || !ata_ready || !ata_info.detected) {
-        return 0;
-    }
-
-    info->detected = ata_info.detected;
-    info->lba28_sectors = ata_info.lba28_sectors;
-    info->addressable_sectors = ata_info.addressable_sectors;
-
-    for (i = 0; i < sizeof(info->model); i++) {
-        info->model[i] = ata_info.model[i];
-    }
-
-    return 1;
-}
-
-static int ata_prepare(uint32_t lba, uint8_t command)
-{
-    if (!ata_ready ||
-        lba > ATA_MAX_LBA ||
-        lba >= ata_info.addressable_sectors) {
-        return 0;
-    }
-
-    outb(ATA_DRIVE,
-         (uint8_t)(0xE0 | ((lba >> 24) & 0x0F)));
-    ata_delay_400ns();
-
-    if (!ata_wait(0)) {
-        return 0;
-    }
-
-    outb(ATA_SECCOUNT, 1);
-    outb(ATA_LBA0, (uint8_t)(lba & 0xFF));
-    outb(ATA_LBA1, (uint8_t)((lba >> 8) & 0xFF));
-    outb(ATA_LBA2, (uint8_t)((lba >> 16) & 0xFF));
-
-    outb(ATA_COMMAND, command);
-
-    return ata_wait(1);
-}
-
-int ata_read_sector(uint32_t lba, uint8_t *buffer)
-{
-    uint32_t i;
-
-    if (buffer == 0 || !ata_prepare(lba, ATA_CMD_READ)) {
-        return 0;
-    }
-
-    for (i = 0; i < 256; i++) {
-        uint16_t word = inw(ATA_DATA);
-
-        buffer[i * 2] = (uint8_t)(word & 0xFF);
-        buffer[i * 2 + 1] = (uint8_t)(word >> 8);
-    }
-
-    ata_delay_400ns();
-
-    return ata_wait_complete();
-}
-
-int ata_write_sector(uint32_t lba, const uint8_t *buffer)
-{
-    uint32_t i;
-
-    if (buffer == 0 || !ata_prepare(lba, ATA_CMD_WRITE)) {
-        return 0;
-    }
-
-    for (i = 0; i < 256; i++) {
-        uint16_t word =
-            (uint16_t)buffer[i * 2]
-            | ((uint16_t)buffer[i * 2 + 1] << 8);
-
-        outw(ATA_DATA, word);
-    }
-
-    ata_delay_400ns();
-
-    if (!ata_wait_complete()) {
-        return 0;
-    }
-
-    outb(ATA_COMMAND, ATA_CMD_FLUSH);
-
-    return ata_wait_complete();
-}
-
 
 uint32_t ata_device_count(void)
 {
@@ -427,11 +324,11 @@ int ata_get_device_info_at(
 {
     uint32_t i;
 
-    if (info == 0 || device >= ATA_MAX_DEVICES)
+    if (!ata_ready || info == 0 ||
+        device >= ATA_MAX_DEVICES ||
+        !ata_info[device].detected) {
         return 0;
-
-    if (!ata_info[device].detected)
-        return 0;
+    }
 
     info->detected = ata_info[device].detected;
     info->lba28_sectors =
@@ -445,8 +342,117 @@ int ata_get_device_info_at(
     return 1;
 }
 
-/* Preserve the old API's primary-master behavior. */
+/* Backward-compatible primary-master information API. */
 int ata_get_device_info(ata_device_info_t *info)
 {
     return ata_get_device_info_at(0, info);
+}
+
+static int ata_prepare(
+    uint32_t device,
+    uint32_t lba,
+    uint8_t command)
+{
+    const ata_device_t *dev;
+
+    if (!ata_ready ||
+        device >= ATA_MAX_DEVICES ||
+        !ata_info[device].detected ||
+        lba > ATA_MAX_LBA ||
+        lba >= ata_info[device].addressable_sectors) {
+        return 0;
+    }
+
+    dev = &ata_devices[device];
+
+    ata_write_reg(
+        dev,
+        ATA_REG_DRIVE,
+        (uint8_t)(
+            0xE0 |
+            (dev->slave << 4) |
+            ((lba >> 24) & 0x0F)));
+
+    ata_delay_400ns(dev);
+
+    if (!ata_wait(dev, 0))
+        return 0;
+
+    ata_write_reg(dev, ATA_REG_SECCOUNT, 1);
+    ata_write_reg(dev, ATA_REG_LBA0, (uint8_t)lba);
+    ata_write_reg(dev, ATA_REG_LBA1, (uint8_t)(lba >> 8));
+    ata_write_reg(dev, ATA_REG_LBA2, (uint8_t)(lba >> 16));
+
+    ata_write_reg(dev, ATA_REG_COMMAND, command);
+
+    return ata_wait(dev, 1);
+}
+
+int ata_read_sector_at(
+    uint32_t device,
+    uint32_t lba,
+    uint8_t *buffer)
+{
+    const ata_device_t *dev;
+    uint32_t i;
+
+    if (buffer == 0 ||
+        !ata_prepare(device, lba, ATA_CMD_READ)) {
+        return 0;
+    }
+
+    dev = &ata_devices[device];
+
+    for (i = 0; i < 256; i++) {
+        uint16_t word = inw(dev->io_base + ATA_REG_DATA);
+
+        buffer[i * 2] = (uint8_t)word;
+        buffer[i * 2 + 1] = (uint8_t)(word >> 8);
+    }
+
+    ata_delay_400ns(dev);
+
+    return ata_wait_complete(dev);
+}
+
+int ata_write_sector_at(
+    uint32_t device,
+    uint32_t lba,
+    const uint8_t *buffer)
+{
+    const ata_device_t *dev;
+    uint32_t i;
+
+    if (buffer == 0 ||
+        !ata_prepare(device, lba, ATA_CMD_WRITE)) {
+        return 0;
+    }
+
+    dev = &ata_devices[device];
+
+    for (i = 0; i < 256; i++) {
+        uint16_t word =
+            (uint16_t)buffer[i * 2] |
+            ((uint16_t)buffer[i * 2 + 1] << 8);
+
+        outw(dev->io_base + ATA_REG_DATA, word);
+    }
+
+    if (!ata_wait_complete(dev))
+        return 0;
+
+    ata_write_reg(dev, ATA_REG_COMMAND, ATA_CMD_FLUSH);
+
+    return ata_wait_complete(dev);
+}
+
+/* Preserve existing callers as primary-master operations. */
+int ata_read_sector(uint32_t lba, uint8_t *buffer)
+{
+    return ata_read_sector_at(0, lba, buffer);
+}
+
+int ata_write_sector(uint32_t lba, const uint8_t *buffer)
+{
+    return ata_write_sector_at(0, lba, buffer);
 }
