@@ -192,11 +192,6 @@ static void mmio_write32(uint32_t base,
     *address = value;
 }
 
-static uint32_t read_physical32(uint32_t address)
-{
-    return *(volatile uint32_t *)(uintptr_t)address;
-}
-
 static uint32_t port_register(uint32_t controller_index,
                               uint32_t port_number,
                               uint32_t offset)
@@ -396,34 +391,23 @@ static int start_port_engine(uint32_t controller_index,
     return 1;
 }
 
+
 static int ahci_prepare_port(uint32_t controller_index,
                              uint32_t port_number)
 {
     uint32_t abar;
     uint32_t command;
-    pci_ahci_controller_t pci_controller;
     uint16_t pci_command;
     uint32_t i;
 
-    if (dma_workspace_unsafe ||
-        controller_index >= controller_count ||
-        port_number >= AHCI_MAX_PORTS) {
+    if (controller_index >= controller_count ||
+        port_number >= AHCI_MAX_PORTS ||
+        dma_workspace_unsafe) {
         return 0;
     }
 
     if (port_faulted[controller_index][port_number] ||
         !ports[controller_index][port_number].detected ||
-        ports[controller_index][port_number].device_type !=
-            AHCI_DEVICE_SATA) {
-        return 0;
-    }
-    
-    if (controller_index >= controller_count ||
-        port_number >= AHCI_MAX_PORTS) {
-        return 0;
-    }
-
-    if (!ports[controller_index][port_number].detected ||
         ports[controller_index][port_number].device_type !=
             AHCI_DEVICE_SATA) {
         return 0;
@@ -448,15 +432,15 @@ static int ahci_prepare_port(uint32_t controller_index,
         return 0;
     }
 
-    if (!pci_get_ahci_controller(
-            controller_index, &pci_controller)) {
-        return 0;
-    }
-
+    /*
+     * Use the BDF saved for this initialized AHCI controller.
+     * Do not use controller_index to index the PCI discovery list:
+     * unsupported controllers may have been skipped during discovery.
+     */
     pci_command = pci_read_config16(
-        pci_controller.bus,
-        pci_controller.device,
-        pci_controller.function,
+        controllers[controller_index].bus,
+        controllers[controller_index].device,
+        controllers[controller_index].function,
         PCI_COMMAND_REGISTER
     );
 
@@ -464,23 +448,19 @@ static int ahci_prepare_port(uint32_t controller_index,
         return 0;
     }
 
-    /*
-     * Enable bus mastering only when preparing an actual AHCI I/O
-     * operation, not during device discovery.
-     */
     if (!(pci_command & PCI_COMMAND_BUSMASTER)) {
         pci_write_config16(
-            pci_controller.bus,
-            pci_controller.device,
-            pci_controller.function,
+            controllers[controller_index].bus,
+            controllers[controller_index].device,
+            controllers[controller_index].function,
             PCI_COMMAND_REGISTER,
             (uint16_t)(pci_command | PCI_COMMAND_BUSMASTER)
         );
 
         pci_command = pci_read_config16(
-            pci_controller.bus,
-            pci_controller.device,
-            pci_controller.function,
+            controllers[controller_index].bus,
+            controllers[controller_index].device,
+            controllers[controller_index].function,
             PCI_COMMAND_REGISTER
         );
 
@@ -489,12 +469,16 @@ static int ahci_prepare_port(uint32_t controller_index,
         }
     }
 
-    /* The HBA must have AHCI mode enabled. */
     command = mmio_read32(abar, HBA_GHC);
+
     if (!(command & HBA_GHC_AE)) {
         mmio_write32(abar, HBA_GHC, command | HBA_GHC_AE);
     }
 
+    /*
+     * Never alter the DMA workspace until the port's engines
+     * have stopped. A stop failure blocks all future AHCI I/O.
+     */
     if (!stop_port_engine(controller_index, port_number)) {
         port_faulted[controller_index][port_number] = 1;
         dma_workspace_unsafe = 1;
@@ -520,10 +504,6 @@ static int ahci_prepare_port(uint32_t controller_index,
     );
     port_write(controller_index, port_number, PX_FBU, 0);
 
-    /*
-     * Slot zero is used for each serialized command. No other slot is
-     * issued by this driver.
-     */
     for (i = 0; i < 32; ++i) {
         dma_command_list.command_list[i].command_table_base = 0;
         dma_command_list.command_list[i].command_table_base_upper = 0;
@@ -721,19 +701,6 @@ static int ahci_issue_command(uint32_t controller_index,
 
 int ahci_initialize(void)
 {
-    port_flush_ext_supported[i][port_number] = 0;
-    dma_workspace_unsafe = 0;
-
-    port_faulted[i][port_number] = 0;
-    port_flush_ext_supported[i][port_number] = 0;
-
-    for (i = 0; i < AHCI_MAX_CONTROLLERS; ++i) {
-        for (port_number = 0; port_number < AHCI_MAX_PORTS;
-             ++port_number) {
-            port_faulted[i][port_number] = 0;
-        }
-    }
-    
     uint32_t i;
     uint32_t port_number;
     uint32_t count;
@@ -744,11 +711,17 @@ int ahci_initialize(void)
     uint32_t ssts;
     uint32_t signature;
     uint32_t task_file;
-    uint32_t command
+    uint32_t command;
     uint16_t pci_command;
+    pci_ahci_controller_t pci_controller;
 
     controller_count = 0;
+    dma_workspace_unsafe = 0;
 
+    /*
+     * Reset all discovered-controller and port state before
+     * scanning the PCI AHCI controller list again.
+     */
     for (i = 0; i < AHCI_MAX_CONTROLLERS; ++i) {
         controllers[i].detected = 0;
 
@@ -756,8 +729,17 @@ int ahci_initialize(void)
              ++port_number) {
             ports[i][port_number].detected = 0;
             ports[i][port_number].identified = 0;
+            ports[i][port_number].device_type = AHCI_DEVICE_NONE;
+            ports[i][port_number].port_number =
+                (uint8_t)port_number;
             ports[i][port_number].model[0] = '\0';
             ports[i][port_number].sector_count = 0;
+            ports[i][port_number].sata_status = 0;
+            ports[i][port_number].sata_signature = 0;
+            ports[i][port_number].task_file_data = 0;
+
+            port_faulted[i][port_number] = 0;
+            port_flush_ext_supported[i][port_number] = 0;
         }
     }
 
@@ -770,6 +752,14 @@ int ahci_initialize(void)
     terminal_writeline("Initializing AHCI discovery...");
 
     for (i = 0; i < count; ++i) {
+        /*
+         * This index refers to the PCI discovery list, not the
+         * compacted list of controllers accepted by this driver.
+         */
+        if (!pci_get_ahci_controller(i, &pci_controller)) {
+            continue;
+        }
+
         if (pci_controller.bar5 == 0 ||
             pci_controller.bar5 == 0xFFFFFFFFu ||
             (pci_controller.bar5 & 1u) ||
@@ -791,9 +781,9 @@ int ahci_initialize(void)
         }
 
         pci_command = pci_read_config16(
-            controllers[controller_index].bus,
-            controllers[controller_index].device,
-            controllers[controller_index].function,
+            pci_controller.bus,
+            pci_controller.device,
+            pci_controller.function,
             PCI_COMMAND_REGISTER
         );
 
@@ -809,17 +799,21 @@ int ahci_initialize(void)
         version = mmio_read32(abar, HBA_VS);
 
         /*
-         * This implementation uses 32-bit DMA addresses. A controller
-         * may support 64-bit DMA as well, but the kernel's buffers and
-         * upper address registers remain deliberately 32-bit.
+         * This driver deliberately uses 32-bit DMA addresses.
          */
         command = mmio_read32(abar, HBA_GHC);
         mmio_write32(abar, HBA_GHC, command | HBA_GHC_AE);
 
+        /*
+         * Store accepted controllers contiguously. Keep their
+         * actual PCI bus/device/function values for later I/O.
+         */
         controllers[controller_count].detected = 1;
         controllers[controller_count].bus = pci_controller.bus;
-        controllers[controller_count].device = pci_controller.device;
-        controllers[controller_count].function = pci_controller.function;
+        controllers[controller_count].device =
+            pci_controller.device;
+        controllers[controller_count].function =
+            pci_controller.function;
         controllers[controller_count].vendor_id =
             pci_controller.vendor_id;
         controllers[controller_count].device_id =
@@ -840,20 +834,20 @@ int ahci_initialize(void)
             }
 
             ssts = mmio_read32(
-                abar + HBA_PORT_BASE + port_number * HBA_PORT_SIZE
-                    + PX_SSTS,
+                abar + HBA_PORT_BASE +
+                    port_number * HBA_PORT_SIZE + PX_SSTS,
                 0
             );
 
             signature = mmio_read32(
-                abar + HBA_PORT_BASE + port_number * HBA_PORT_SIZE
-                    + PX_SIG,
+                abar + HBA_PORT_BASE +
+                    port_number * HBA_PORT_SIZE + PX_SIG,
                 0
             );
 
             task_file = mmio_read32(
-                abar + HBA_PORT_BASE + port_number * HBA_PORT_SIZE
-                    + PX_TFD,
+                abar + HBA_PORT_BASE +
+                    port_number * HBA_PORT_SIZE + PX_TFD,
                 0
             );
 
@@ -863,6 +857,7 @@ int ahci_initialize(void)
             }
 
             port = &ports[controller_count][port_number];
+
             port->detected = 1;
             port->port_number = (uint8_t)port_number;
             port->sata_status = ssts;
