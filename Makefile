@@ -106,12 +106,10 @@ $(BUILD_DIR)/pci.o: kernel/pci.c kernel/pci.h kernel/terminal.h | $(BUILD_DIR)
 $(BUILD_DIR)/ahci.o: kernel/ahci.c kernel/ahci.h kernel/pci.h kernel/terminal.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/setup.o: kernel/setup.c kernel/setup.h kernel/keyboard.h kernel/terminal.h kernel/ata.h kernel/pci.h kernel/ahci.h
-	| $(BUILD_DIR)
+$(BUILD_DIR)/setup.o: kernel/setup.c kernel/setup.h kernel/keyboard.h kernel/terminal.h kernel/ata.h kernel/pci.h kernel/ahci.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/setup_installer.o: kernel/setup.c kernel/setup.h kernel/keyboard.h kernel/terminal.h kernel/ata.h kernel/pci.h kernel/ahci.h
-	| $(BUILD_DIR)
+$(BUILD_DIR)/setup_installer.o: kernel/setup.c kernel/setup.h kernel/keyboard.h kernel/terminal.h kernel/ata.h kernel/pci.h kernel/ahci.h | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -DNPT_INSTALLER_BUILD -c $< -o $@
 
 # --------------------------------------------------
