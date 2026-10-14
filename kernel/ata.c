@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include "ata.h"
+#include "ahci.h"
 
 #define ATA_PRIMARY_IO       0x1F0
 #define ATA_PRIMARY_CTRL     0x3F6
@@ -455,4 +456,282 @@ int ata_read_sector(uint32_t lba, uint8_t *buffer)
 int ata_write_sector(uint32_t lba, const uint8_t *buffer)
 {
     return ata_write_sector_at(0, lba, buffer);
+}
+
+
+/*
+ * Shared storage interface.
+ *
+ * IDE device IDs:
+ *   0-3
+ *
+ * SATA device IDs:
+ *   STORAGE_SATA_ID_BASE + controller * AHCI_MAX_PORTS + port
+ *
+ * SATA IDs remain stable even when some controllers or ports
+ * have no usable disk attached.
+ */
+
+static uint32_t storage_detected_count;
+static int storage_ready;
+
+static int storage_get_device_info_by_id(
+    uint32_t device_id,
+    storage_device_info_t *info)
+{
+    uint32_t i;
+
+    if (info == 0 || !storage_ready) {
+        return 0;
+    }
+
+    /*
+     * IDE devices retain their existing IDs.
+     */
+    if (device_id < STORAGE_IDE_DEVICE_COUNT) {
+        ata_device_info_t ide_info;
+
+        if (!ata_get_device_info_at(device_id, &ide_info)) {
+            return 0;
+        }
+
+        info->id = device_id;
+        info->kind = STORAGE_DEVICE_IDE;
+        info->sector_count =
+            (uint64_t)ide_info.addressable_sectors;
+
+        for (i = 0; i < sizeof(info->model); ++i) {
+            info->model[i] = ide_info.model[i];
+        }
+
+        return 1;
+    }
+
+    /*
+     * Decode the stable SATA controller/port ID.
+     */
+    {
+        uint32_t sata_id = device_id - STORAGE_SATA_ID_BASE;
+        uint32_t controller_index =
+            sata_id / AHCI_MAX_PORTS;
+        uint32_t port_number =
+            sata_id % AHCI_MAX_PORTS;
+        ahci_port_info_t port;
+
+        if (controller_index >= ahci_controller_count()) {
+            return 0;
+        }
+
+        if (!ahci_get_port_info(
+                controller_index, port_number, &port)) {
+            return 0;
+        }
+
+        if (!port.detected ||
+            !port.identified ||
+            port.device_type != AHCI_DEVICE_SATA ||
+            port.sector_count == 0) {
+            return 0;
+        }
+
+        info->id = device_id;
+        info->kind = STORAGE_DEVICE_SATA;
+        info->sector_count = port.sector_count;
+
+        for (i = 0; i < sizeof(info->model); ++i) {
+            info->model[i] = port.model[i];
+        }
+    }
+
+    return 1;
+}
+
+/*
+ * Initialize the shared interface.
+ *
+ * AHCI discovery is deliberately not repeated here. The AHCI
+ * driver must already have been initialized by kernel startup.
+ */
+int storage_initialize(void)
+{
+    uint32_t i;
+    uint32_t controller_index;
+    uint32_t controllers_found;
+    storage_device_info_t info;
+
+    storage_ready = 0;
+    storage_detected_count = 0;
+
+    /*
+     * Refresh the legacy IDE discovery state.
+     * SATA devices remain available even if no IDE disk exists.
+     */
+    (void)ata_initialize();
+
+    for (i = 0; i < STORAGE_IDE_DEVICE_COUNT; ++i) {
+        ata_device_info_t ide_info;
+
+        if (ata_get_device_info_at(i, &ide_info)) {
+            ++storage_detected_count;
+        }
+    }
+
+    controllers_found = ahci_controller_count();
+
+    for (controller_index = 0;
+         controller_index < controllers_found;
+         ++controller_index) {
+        uint32_t port_number;
+
+        for (port_number = 0;
+             port_number < AHCI_MAX_PORTS;
+             ++port_number) {
+            uint32_t device_id =
+                STORAGE_SATA_ID_BASE +
+                controller_index * AHCI_MAX_PORTS +
+                port_number;
+
+            if (storage_get_device_info_by_id(
+                    device_id, &info)) {
+                ++storage_detected_count;
+            }
+        }
+    }
+
+    storage_ready = 1;
+    return storage_detected_count != 0;
+}
+
+uint32_t storage_device_count(void)
+{
+    if (!storage_ready) {
+        return 0;
+    }
+
+    return storage_detected_count;
+}
+
+/*
+ * Return the information for the Nth available device.
+ * Enumeration order: IDE devices first, then SATA devices.
+ */
+int storage_get_device_info_at(
+    uint32_t index,
+    storage_device_info_t *info)
+{
+    uint32_t i;
+    uint32_t current = 0;
+    uint32_t controllers_found;
+
+    if (!storage_ready || info == 0) {
+        return 0;
+    }
+
+    for (i = 0; i < STORAGE_IDE_DEVICE_COUNT; ++i) {
+        storage_device_info_t candidate;
+
+        if (!storage_get_device_info_by_id(i, &candidate)) {
+            continue;
+        }
+
+        if (current == index) {
+            *info = candidate;
+            return 1;
+        }
+
+        ++current;
+    }
+
+    controllers_found = ahci_controller_count();
+
+    for (i = 0; i < controllers_found * AHCI_MAX_PORTS; ++i) {
+        storage_device_info_t candidate;
+        uint32_t device_id = STORAGE_SATA_ID_BASE + i;
+
+        if (!storage_get_device_info_by_id(
+                device_id, &candidate)) {
+            continue;
+        }
+
+        if (current == index) {
+            *info = candidate;
+            return 1;
+        }
+
+        ++current;
+    }
+
+    return 0;
+}
+
+int storage_read_sector(
+    uint32_t device_id,
+    uint64_t lba,
+    uint8_t *buffer)
+{
+    storage_device_info_t info;
+
+    if (buffer == 0 ||
+        !storage_get_device_info_by_id(device_id, &info) ||
+        lba >= info.sector_count) {
+        return 0;
+    }
+
+    if (info.kind == STORAGE_DEVICE_IDE) {
+        if (lba > 0xFFFFFFFFULL) {
+            return 0;
+        }
+
+        return ata_read_sector_at(
+            device_id, (uint32_t)lba, buffer);
+    }
+
+    if (info.kind == STORAGE_DEVICE_SATA) {
+        uint32_t sata_id = device_id - STORAGE_SATA_ID_BASE;
+        uint32_t controller_index =
+            sata_id / AHCI_MAX_PORTS;
+        uint32_t port_number =
+            sata_id % AHCI_MAX_PORTS;
+
+        return ahci_read_sector(
+            controller_index, port_number, lba, buffer);
+    }
+
+    return 0;
+}
+
+int storage_write_sector(
+    uint32_t device_id,
+    uint64_t lba,
+    const uint8_t *buffer)
+{
+    storage_device_info_t info;
+
+    if (buffer == 0 ||
+        !storage_get_device_info_by_id(device_id, &info) ||
+        lba >= info.sector_count) {
+        return 0;
+    }
+
+    if (info.kind == STORAGE_DEVICE_IDE) {
+        if (lba > 0xFFFFFFFFULL) {
+            return 0;
+        }
+
+        return ata_write_sector_at(
+            device_id, (uint32_t)lba, buffer);
+    }
+
+    if (info.kind == STORAGE_DEVICE_SATA) {
+        uint32_t sata_id = device_id - STORAGE_SATA_ID_BASE;
+        uint32_t controller_index =
+            sata_id / AHCI_MAX_PORTS;
+        uint32_t port_number =
+            sata_id % AHCI_MAX_PORTS;
+
+        return ahci_write_sector(
+            controller_index, port_number, lba, buffer);
+    }
+
+    return 0;
 }
