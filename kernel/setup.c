@@ -193,7 +193,6 @@ static void setup_draw_screen(void)
     terminal_writeline("================================================");
     terminal_writeline("Welcome to NPT-DOS Setup.");
     terminal_writeline("Choose how you want to use NPT-DOS:");
-    terminal_writeline("");
     terminal_writeline("+----------------------------------------------+");
     terminal_writeline("| 1. INSTALL TO HARD DISK                      |");
     terminal_writeline("|    Inspect and select a supported IDE disk.  |");
@@ -212,7 +211,6 @@ static void setup_draw_screen(void)
     terminal_writeline("");
     terminal_writeline("Press 1, 2, or 3 to select an option.");
     terminal_writeline("Press Q to exit setup.");
-
 }
 
 static int setup_has_nptfs_signature(const uint8_t *sector)
