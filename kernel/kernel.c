@@ -222,6 +222,9 @@ static void command_help(char *arguments)
         terminal_writeline("FREE                    Available storage");
         terminal_writeline("FSINFO                  Filesystem information");
         terminal_writeline("FORMAT CONFIRM          Format the NPTFS disk");
+        terminal_writeline("DISKS                   List detected storage devices")
+        terminal_writeline("FSSELECT <id>           Mount an existing NPTFS filesystem")
+        terminal_writeline("FORMAT <id> CONFIRM     Format the specified storage device")
         terminal_writeline("EXIT                    Display exit information");
         terminal_writeline("");
         terminal_writeline("Use HELP <command> for details.");
@@ -345,6 +348,19 @@ static void command_help(char *arguments)
     } else if (string_equals_ignore_case(topic, "DISKID")) {
         terminal_writeline("DISKID");
         terminal_writeline("Display primary-master ATA model and capacity");
+    } else if (string_equals_ignore_case(topic, "DISKS")) {
+        terminal_writeline("DISKS");
+        terminal_writeline("Lists detected IDE and SATA/AHCI storage devices.");
+        terminal_writeline("Displays each device ID, model, and sector count.");
+    } else if (string_equals_ignore_case(topic, "FSSELECT")) {
+        terminal_writeline("FSSELECT <id>");
+        terminal_writeline("Mounts an existing NPTFS filesystem on the specified device.");
+        terminal_writeline("Does not format the disk if mounting fails.");
+    } else if (string_equals_ignore_case(topic, "FORMAT")) {
+        terminal_writeline("FORMAT <id> CONFIRM");
+        terminal_writeline("Formats NPTFS on the specified storage device.");
+        terminal_writeline("WARNING: Existing data in the NPTFS area will be erased.");
+        terminal_writeline("Verify the device ID with DISKS before formatting.");
     } else {
         terminal_write("No detailed help available for: ");
         terminal_writeline(topic);
@@ -723,6 +739,213 @@ static void command_diskid(void)
     terminal_writeline("Addressing:           ATA LBA28");
     terminal_writeline("Sector size:          512 bytes");
     terminal_writeline("Disk writes:          None by this command");
+}
+
+static void command_disks(void)
+{
+    uint32_t count = storage_device_count();
+    uint32_t i;
+
+    terminal_writeline("Detected storage devices:");
+    terminal_writeline("--------------------------------");
+
+    if (count == 0) {
+        terminal_writeline("No supported storage devices found.");
+        return;
+    }
+
+    for (i = 0; i < count; i++) {
+        storage_device_info_t info;
+        char line[128];
+        char number[21];
+        uint64_t value;
+        uint32_t n = 0;
+        uint32_t j;
+
+        if (!storage_get_device_info_at(i, &info)) {
+            continue;
+        }
+
+        /* Build: ID <id> | <model> | <sectors> sectors */
+        line[0] = '\0';
+
+        {
+            const char prefix[] = "ID ";
+            for (j = 0; prefix[j] != '\0'; j++) {
+                line[n++] = prefix[j];
+            }
+        }
+
+        value = info.id;
+        {
+            char reversed[10];
+            uint32_t digits = 0;
+
+            do {
+                reversed[digits++] = (char)('0' + value % 10U);
+                value /= 10U;
+            } while (value != 0 && digits < sizeof(reversed));
+
+            while (digits > 0) {
+                line[n++] = reversed[--digits];
+            }
+        }
+
+        {
+            const char separator[] = " | ";
+            for (j = 0; separator[j] != '\0'; j++) {
+                line[n++] = separator[j];
+            }
+        }
+
+        for (j = 0; info.model[j] != '\0' &&
+                    n < sizeof(line) - 1; j++) {
+            line[n++] = info.model[j];
+        }
+
+        {
+            const char separator[] = " | ";
+            for (j = 0; separator[j] != '\0'; j++) {
+                if (n < sizeof(line) - 1) {
+                    line[n++] = separator[j];
+                }
+            }
+        }
+
+        /* Convert the 64-bit sector count to decimal. */
+        value = info.sector_count;
+        {
+            char reversed[20];
+            uint32_t digits = 0;
+
+            do {
+                reversed[digits++] = (char)('0' + value % 10U);
+                value /= 10U;
+            } while (value != 0 && digits < sizeof(reversed));
+
+            while (digits > 0 && n < sizeof(line) - 1) {
+                line[n++] = reversed[--digits];
+            }
+        }
+
+        {
+            const char suffix[] = " sectors";
+            for (j = 0; suffix[j] != '\0' &&
+                        n < sizeof(line) - 1; j++) {
+                line[n++] = suffix[j];
+            }
+        }
+
+        line[n] = '\0';
+        terminal_writeline(line);
+    }
+
+    terminal_writeline("--------------------------------");
+    terminal_writeline("Use FSSELECT <id> to mount NPTFS.");
+}
+
+static void command_fsselect(char *arguments)
+{
+    char *id_token = take_token(&arguments);
+    uint32_t device_id;
+    uint32_t i;
+    storage_device_info_t info;
+    int found = 0;
+
+    arguments = skip_spaces(arguments);
+
+    if (*id_token == '\0' || *arguments != '\0' ||
+        !shell_parse_device_id(id_token, &device_id)) {
+        terminal_writeline("Usage: FSSELECT <id>");
+        return;
+    }
+
+    for (i = 0; i < storage_device_count(); i++) {
+        if (storage_get_device_info_at(i, &info) &&
+            info.id == device_id) {
+            found = 1;
+            break;
+        }
+    }
+
+    if (!found) {
+        terminal_writeline("Storage device not found.");
+        return;
+    }
+
+    terminal_write("Mounting NPTFS from device ID ");
+    /* Use your existing integer-printing helper here, if available. */
+    terminal_writeline(info.model);
+
+    if (!fs_select_device(device_id)) {
+        terminal_writeline("NPTFS mount failed.");
+        terminal_writeline("Disk may be unformatted or unreadable.");
+        terminal_writeline("No formatting was performed.");
+        return;
+    }
+
+    terminal_writeline("NPTFS mounted successfully.");
+}
+
+static void command_format(char *arguments)
+{
+    char *cursor = arguments;
+    char *id_token;
+    char *confirmation;
+    uint32_t device_id;
+    uint32_t i;
+    storage_device_info_t info;
+    int found = 0;
+    fs_result_t result;
+
+    id_token = shell_next_token(&cursor);
+    confirmation = shell_next_token(&cursor);
+
+    if (id_token == NULL ||
+        confirmation == NULL ||
+        shell_next_token(&cursor) != NULL ||
+        !shell_parse_device_id(id_token, &device_id) ||
+        confirmation[0] == '\0' ||
+        confirmation[0] != 'C' ||
+        confirmation[1] != 'O' ||
+        confirmation[2] != 'N' ||
+        confirmation[3] != 'F' ||
+        confirmation[4] != 'I' ||
+        confirmation[5] != 'R' ||
+        confirmation[6] != 'M' ||
+        confirmation[7] != '\0') {
+        terminal_writeline("Usage: FORMAT <id> CONFIRM");
+        terminal_writeline("WARNING: Formatting destroys existing data.");
+        return;
+    }
+
+    for (i = 0; i < storage_device_count(); i++) {
+        if (storage_get_device_info_at(i, &info) &&
+            info.id == device_id) {
+            found = 1;
+            break;
+        }
+    }
+
+    if (!found) {
+        terminal_writeline("Storage device not found.");
+        return;
+    }
+
+    terminal_writeline("WARNING: Formatting will erase NPTFS data.");
+    terminal_writeline("Target device model:");
+    terminal_writeline(info.model);
+    terminal_writeline("Check the ID with DISKS before continuing.");
+
+    result = fs_format_device(device_id);
+
+    if (result == FS_OK) {
+        terminal_writeline("NPTFS format completed successfully.");
+    } else if (result == FS_NOT_READY) {
+        terminal_writeline("Format failed: device unavailable or too small.");
+    } else {
+        terminal_writeline("Format failed: storage I/O error.");
+    }
 }
 
 static void command_free(void)
@@ -1341,22 +1564,6 @@ static void execute_command(char *line)
         command_replace(arguments);
     } else if (string_equals_ignore_case(command, "ATTRIB")) {
         command_attrib(arguments);
-    } else if (string_equals_ignore_case(command, "FORMAT")) {
-        if (!string_equals_ignore_case(arguments, "CONFIRM")) {
-            terminal_writeline("Formatting erases all NPTFS files.");
-            terminal_writeline("To proceed, enter: FORMAT CONFIRM");
-            return;
-        }
-
-        terminal_writeline("Starting NPTFS format...");
-
-        {
-            fs_result_t result = fs_format();
-            report_fs_result(result);
-
-            if (fs_is_ready()) terminal_writeline("NPTFS format completed.");
-            else terminal_writeline("NPTFS remains unavailable.");
-        }
     } else if (string_equals_ignore_case(command, "SYSINFO")) {
         if (*arguments != '\0') terminal_writeline("Usage: SYSINFO");
         else command_sysinfo();
@@ -1375,6 +1582,16 @@ static void execute_command(char *line)
     } else if (string_equals_ignore_case(command, "DISKID")) {
         if (*arguments != '\0') terminal_writeline("Usage: DISKID");
         else command_diskid();
+    } else if (string_equals_ignore_case(command, "DISKS")) {
+        if (*arguments != '\0') {
+            terminal_writeline("Usage: DISKS");
+        } else {
+            command_disks();
+        }
+    } else if (string_equals_ignore_case(command, "FSSELECT")) {
+        command_fsselect(arguments);
+    } else if (string_equals_ignore_case(command, "FORMAT")) {
+        command_format(arguments);
     } else {
         terminal_write("Unknown command: ");
         terminal_writeline(command);
