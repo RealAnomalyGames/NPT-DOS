@@ -11,6 +11,7 @@
 
 static uint8_t directory[SECTOR_SIZE];
 static uint8_t sector_buffer[SECTOR_SIZE];
+static uint32_t filesystem_device_id = 0xFFFFFFFFU;
 static char read_buffer[FS_CONTENT_MAX + 1];
 static int filesystem_ready;
 static int disk_available;
@@ -108,23 +109,68 @@ static fs_result_t save_directory(void)
 {
     if (!filesystem_ready) return FS_NOT_READY;
 
-    if (!ata_write_sector(DIRECTORY_LBA, directory)) {
+    if (!storage_write_sector(filesystem_device_id, DIRECTORY_LBA, directory)) {
         return FS_IO_ERROR;
     }
 
     return FS_OK;
 }
 
+static int fs_get_storage_info(
+    uint32_t device_id,
+    storage_device_info_t *result)
+{
+    uint32_t i;
+    uint32_t count = storage_device_count();
+
+    for (i = 0; i < count; i++) {
+        storage_device_info_t info;
+
+        if (!storage_get_device_info_at(i, &info)) {
+            continue;
+        }
+
+        if (info.id == device_id) {
+            if (result != NULL) {
+                *result = info;
+            }
+
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 void fs_initialize(void)
 {
+    filesystem_ready = 0;
+    filesystem_device_id = 0xFFFFFFFFU;
+
+    (void)fs_initialize_device(0U);
+}
+
+int fs_initialize_device(uint32_t device_id)
+{
     uint8_t superblock[SECTOR_SIZE];
+    storage_device_info_t info;
 
     filesystem_ready = 0;
-    disk_available = ata_initialize();
+    filesystem_device_id = device_id;
 
-    if (!disk_available) return;
+    if (!fs_get_storage_info(device_id, &info)) {
+        return 0;
+    }
 
-    if (!ata_read_sector(SUPERBLOCK_LBA, superblock)) return;
+    /* LBAs 0 through 18 are required by NPTFS v1. */
+    if (info.sector_count < 19U) {
+        return 0;
+    }
+
+    if (!storage_read_sector(
+            device_id, SUPERBLOCK_LBA, superblock)) {
+        return 0;
+    }
 
     if (superblock[0] != 'N' ||
         superblock[1] != 'P' ||
@@ -135,12 +181,31 @@ void fs_initialize(void)
         superblock[6] != '0' ||
         superblock[7] != '1' ||
         superblock[8] != 1) {
-        return;
+        return 0;
     }
 
-    if (!ata_read_sector(DIRECTORY_LBA, directory)) return;
+    if (!storage_read_sector(
+            device_id, DIRECTORY_LBA, directory)) {
+        return 0;
+    }
 
     filesystem_ready = 1;
+    return 1;
+}
+
+int fs_select_device(uint32_t device_id)
+{
+    return fs_initialize_device(device_id);
+}
+
+int fs_get_device_id(uint32_t *device_id)
+{
+    if (device_id == NULL || filesystem_device_id == 0xFFFFFFFFU) {
+        return 0;
+    }
+
+    *device_id = filesystem_device_id;
+    return 1;
 }
 
 int fs_is_ready(void)
@@ -148,46 +213,49 @@ int fs_is_ready(void)
     return filesystem_ready;
 }
 
-fs_result_t fs_format(void)
+fs_result_t fs_format_device(uint32_t device_id)
 {
     uint8_t superblock[SECTOR_SIZE];
+    storage_device_info_t info;
     int i;
 
-    if (!disk_available) {
-        disk_available = ata_initialize();
+    filesystem_ready = 0;
+    filesystem_device_id = device_id;
+
+    if (!fs_get_storage_info(device_id, &info)) {
+        return FS_NOT_READY;
     }
 
-    if (!disk_available) return FS_NOT_READY;
+    if (info.sector_count < 19U) {
+        return FS_NOT_READY;
+    }
 
-    /*
-     * Write the signature last. An interrupted format will not
-     * be mistaken for a completed filesystem on the next boot.
-     */
-    clear_buffer(&superblock[0]);
+    /* Invalidate any previous NPTFS signature first. */
+    clear_buffer(superblock);
 
-    if (!ata_write_sector(SUPERBLOCK_LBA, superblock)) {
-        filesystem_ready = 0;
+    if (!storage_write_sector(
+            device_id, SUPERBLOCK_LBA, superblock)) {
         return FS_IO_ERROR;
     }
 
     clear_buffer(directory);
 
-    if (!ata_write_sector(DIRECTORY_LBA, directory)) {
-        filesystem_ready = 0;
+    if (!storage_write_sector(
+            device_id, DIRECTORY_LBA, directory)) {
         return FS_IO_ERROR;
     }
 
     clear_buffer(sector_buffer);
 
     for (i = 0; i < FS_MAX_FILES; i++) {
-        if (!ata_write_sector(DATA_LBA_BASE + (uint32_t)i,
-                              sector_buffer)) {
-            filesystem_ready = 0;
+        if (!storage_write_sector(
+                device_id,
+                DATA_LBA_BASE + (uint32_t)i,
+                sector_buffer)) {
             return FS_IO_ERROR;
         }
     }
 
-    clear_buffer(superblock);
     superblock[0] = 'N';
     superblock[1] = 'P';
     superblock[2] = 'T';
@@ -198,13 +266,22 @@ fs_result_t fs_format(void)
     superblock[7] = '1';
     superblock[8] = 1;
 
-    if (!ata_write_sector(SUPERBLOCK_LBA, superblock)) {
-        filesystem_ready = 0;
+    if (!storage_write_sector(
+            device_id, SUPERBLOCK_LBA, superblock)) {
         return FS_IO_ERROR;
     }
 
     filesystem_ready = 1;
     return FS_OK;
+}
+
+fs_result_t fs_format(void)
+{
+    if (filesystem_device_id == 0xFFFFFFFFU) {
+        return FS_NOT_READY;
+    }
+
+    return fs_format_device(filesystem_device_id);
 }
 
 fs_result_t fs_create(const char *name)
@@ -287,7 +364,7 @@ fs_result_t fs_write(const char *name, const char *text)
         sector_buffer[i] = (uint8_t)text[i];
     }
 
-    if (!ata_write_sector(DATA_LBA_BASE + (uint32_t)index,
+    if (!storage_write_sector(filesystem_device_id, DATA_LBA_BASE + (uint32_t)index,
                           sector_buffer)) {
         return FS_IO_ERROR;
     }
@@ -324,7 +401,7 @@ const char *fs_read(const char *name)
 
     if (length > FS_CONTENT_MAX) return NULL;
 
-    if (!ata_read_sector(DATA_LBA_BASE + (uint32_t)index,
+    if (!storage_read_sector(filesystem_device_id, DATA_LBA_BASE + (uint32_t)index,
                          sector_buffer)) {
         return NULL;
     }
