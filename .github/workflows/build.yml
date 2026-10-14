@@ -15,6 +15,10 @@ jobs:
   build:
     name: Build and Validate NPT-DOS Installer
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
 
     steps:
       - name: Check out repository
@@ -174,6 +178,11 @@ jobs:
             > build/SHA256SUMS
 
           cat build/SHA256SUMS
+
+      - name: Attest NPT-DOS ISO provenance
+        uses: actions/attest@v4
+        with:
+          subject-path: build/npt-dos-1.0.iso
 
       - name: Upload validated NPT-DOS ISO
         uses: actions/upload-artifact@v4
