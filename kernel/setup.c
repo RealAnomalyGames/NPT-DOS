@@ -191,9 +191,7 @@ static void setup_draw_screen(void)
     terminal_writeline("                  NPT-DOS SETUP                 ");
     terminal_writeline("               Neptune Corporation              ");
     terminal_writeline("================================================");
-    terminal_writeline("");
     terminal_writeline("Welcome to NPT-DOS Setup.");
-    terminal_writeline("");
     terminal_writeline("Choose how you want to use NPT-DOS:");
     terminal_writeline("");
     terminal_writeline("+----------------------------------------------+");
@@ -201,13 +199,11 @@ static void setup_draw_screen(void)
     terminal_writeline("|    Inspect and select a supported IDE disk.  |");
     terminal_writeline("|    Installation requires explicit approval.  |");
     terminal_writeline("+----------------------------------------------+");
-    terminal_writeline("");
     terminal_writeline("+----------------------------------------------+");
     terminal_writeline("| 2. PORTABLE MODE                             |");
     terminal_writeline("|    Continue booting from the current media.  |");
     terminal_writeline("|    No installer disk writes are performed.   |");
     terminal_writeline("+----------------------------------------------+");
-    terminal_writeline("");
     terminal_writeline("+----------------------------------------------+");
     terminal_writeline("| 3. INSPECT SATA / AHCI DEVICES               |");
     terminal_writeline("|    Read-only controller and port inspection. |");
