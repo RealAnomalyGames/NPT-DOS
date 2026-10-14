@@ -841,7 +841,7 @@ static void command_disks(void)
     for (i = 0; i < count; i++) {
         storage_device_info_t info;
         char line[128];
-        uint64_t value;
+        uint32_t value;
         uint32_t n = 0;
         uint32_t j;
 
@@ -895,8 +895,19 @@ static void command_disks(void)
             }
         }
 
-        /* Convert the 64-bit sector count to decimal. */
-        command_print_u64(info.sector_count);
+        char sector_count_text[21];
+        uint32_t sector_len;
+        uint32_t k;
+
+         sector_len = u64_to_decimal(
+            info.sector_count,
+            sector_count_text,
+            sizeof(sector_count_text)
+        );
+
+        for (k = 0; k < sector_len && n < sizeof(line) - 1; k++) {
+            line[n++] = sector_count_text[k];
+        }
 
         {
             const char suffix[] = " sectors";
