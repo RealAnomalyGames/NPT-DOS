@@ -1,3 +1,4 @@
+
 #include "setup.h"
 #include "terminal.h"
 #include "keyboard.h"
@@ -5,8 +6,19 @@
 
 #include <stdint.h>
 
-#define ATA_SECTOR_SIZE 512U
-#define NPTFS_SUPERBLOCK_LBA 1U
+#define ATA_SECTOR_SIZE       512U
+#define NPTFS_SUPERBLOCK_LBA  1U
+
+static const char *setup_device_name(uint32_t device)
+{
+    switch (device) {
+        case 0: return "Primary Master";
+        case 1: return "Primary Slave";
+        case 2: return "Secondary Master";
+        case 3: return "Secondary Slave";
+        default: return "Unknown";
+    }
+}
 
 static void setup_print_u32(uint32_t value)
 {
@@ -16,7 +28,8 @@ static void setup_print_u32(uint32_t value)
     buffer[position] = '\0';
 
     do {
-        buffer[--position] = (char)('0' + (value % 10U));
+        buffer[--position] =
+            (char)('0' + (value % 10U));
         value /= 10U;
     } while (value != 0U && position > 0);
 
@@ -44,8 +57,8 @@ static void setup_draw_screen(void)
     terminal_writeline("+----------------------------------------------+");
     terminal_writeline("| 1. INSTALL TO HARD DISK                      |");
     terminal_writeline("|                                              |");
-    terminal_writeline("|    Inspect and select a supported disk.      |");
-    terminal_writeline("|    Installation is not enabled in this build.|");
+    terminal_writeline("|    Inspect and select a supported IDE disk.  |");
+    terminal_writeline("|    Installation requires explicit approval.  |");
     terminal_writeline("+----------------------------------------------+");
     terminal_writeline("");
     terminal_writeline("+----------------------------------------------+");
@@ -68,84 +81,72 @@ static int setup_has_nptfs_signature(const uint8_t *sector)
     unsigned int i;
 
     for (i = 0; i < 8U; i++) {
-        if (sector[i] != (uint8_t)signature[i]) {
+        if (sector[i] != (uint8_t)signature[i])
             return 0;
-        }
+    }
+
+    return 1;
+}
+
+static int setup_sector_is_zero(const uint8_t *sector)
+{
+    unsigned int i;
+
+    for (i = 0; i < ATA_SECTOR_SIZE; i++) {
+        if (sector[i] != 0U)
+            return 0;
     }
 
     return 1;
 }
 
 /*
- * Read-only installer safety inspection.
+ * Read-only check for the selected physical ATA device.
  *
- * The proposed installer would overwrite:
+ * Planned writes:
  *   LBA 0
- *   LBA 32-47
- *   LBA 64-319
+ *   LBAs 32-47
+ *   LBAs 64-319
  *
- * Return values:
+ * Returns:
  *   1  All planned overwrite sectors were readable and zero.
  *   0  At least one planned overwrite sector contained data.
  *  -1  Capacity or sector read was unavailable.
  */
-static int setup_sector_is_zero(const uint8_t *sector)
-{
-    unsigned int i;
-
-    for (i = 0; i < ATA_SECTOR_SIZE; i++) {
-        if (sector[i] != 0U) {
-            return 0;
-        }
-    }
-
-    return 1;
-}
-
-static int setup_check_planned_write_sectors(uint32_t sectors)
+static int setup_check_planned_write_sectors(
+    uint32_t device,
+    uint32_t sectors)
 {
     uint8_t sector[ATA_SECTOR_SIZE];
     uint32_t lba;
 
-    /* The highest planned sector is LBA 319. */
-    if (sectors < 320U) {
+    if (sectors < 320U)
         return -1;
-    }
 
-    /* The boot sector would be overwritten. */
-    if (!ata_read_sector(0U, sector)) {
+    if (!ata_read_sector_at(device, 0U, sector))
         return -1;
-    }
 
-    if (!setup_sector_is_zero(sector)) {
+    if (!setup_sector_is_zero(sector))
         return 0;
-    }
 
-    /* The second-stage loader occupies LBAs 32 through 47. */
     for (lba = 32U; lba <= 47U; lba++) {
-        if (!ata_read_sector(lba, sector)) {
+        if (!ata_read_sector_at(device, lba, sector))
             return -1;
-        }
 
-        if (!setup_sector_is_zero(sector)) {
+        if (!setup_sector_is_zero(sector))
             return 0;
-        }
     }
 
-    /* The padded installed kernel occupies LBAs 64 through 319. */
     for (lba = 64U; lba <= 319U; lba++) {
-        if (!ata_read_sector(lba, sector)) {
+        if (!ata_read_sector_at(device, lba, sector))
             return -1;
-        }
 
-        if (!setup_sector_is_zero(sector)) {
+        if (!setup_sector_is_zero(sector))
             return 0;
-        }
     }
 
     return 1;
 }
-
 
 #ifdef NPT_INSTALLER_BUILD
 
@@ -161,35 +162,33 @@ extern const uint8_t installer_kernel_start[];
 
 static int installer_sector_matches(
     const uint8_t *expected,
-    const uint8_t *actual
-)
+    const uint8_t *actual)
 {
     unsigned int i;
 
     for (i = 0; i < ATA_SECTOR_SIZE; i++) {
-        if (expected[i] != actual[i]) {
+        if (expected[i] != actual[i])
             return 0;
-        }
     }
 
     return 1;
 }
 
 static int installer_write_verified_sector(
+    uint32_t device,
     uint32_t lba,
-    const uint8_t *data
-)
+    const uint8_t *data)
 {
     uint8_t verify[ATA_SECTOR_SIZE];
 
-    if (!ata_write_sector(lba, data)) {
+    if (!ata_write_sector_at(device, lba, data)) {
         terminal_write("WRITE FAILED at LBA ");
         setup_print_u32(lba);
         terminal_writeline("");
         return 0;
     }
 
-    if (!ata_read_sector(lba, verify)) {
+    if (!ata_read_sector_at(device, lba, verify)) {
         terminal_write("READ-BACK FAILED at LBA ");
         setup_print_u32(lba);
         terminal_writeline("");
@@ -206,16 +205,9 @@ static int installer_write_verified_sector(
     return 1;
 }
 
-/*
- * The installation routine deliberately never writes LBAs 1-18.
- *
- * It writes the second-stage loader and kernel first, verifies them,
- * and writes the boot sector last so a partial installation is less
- * likely to become accidentally bootable.
- */
 static void installer_install_target(
-    const ata_device_info_t *info
-)
+    uint32_t device,
+    const ata_device_info_t *info)
 {
     uint8_t sector[ATA_SECTOR_SIZE];
     uint32_t lba;
@@ -224,6 +216,11 @@ static void installer_install_target(
     terminal_clear();
     terminal_writeline("NPT-DOS INSTALLER");
     terminal_writeline("-----------------");
+    terminal_writeline("");
+    terminal_write("Target: ");
+    terminal_writeline(setup_device_name(device));
+    terminal_write("Model: ");
+    terminal_writeline(info ? info->model : "(unknown)");
     terminal_writeline("");
     terminal_writeline("Performing final read-only checks...");
 
@@ -234,10 +231,8 @@ static void installer_install_target(
         goto failed;
     }
 
-    /*
-     * Recheck NPTFS immediately before writing.
-     */
-    if (!ata_read_sector(1U, sector)) {
+    /* Recheck the selected target immediately before writing. */
+    if (!ata_read_sector_at(device, 1U, sector)) {
         terminal_writeline("SAFETY STOP: Cannot read LBA 1.");
         goto failed;
     }
@@ -249,11 +244,11 @@ static void installer_install_target(
     }
 
     /*
-     * Be conservative: require LBAs 1-18 to be zero too.
-     * This is not a whole-disk emptiness guarantee.
+     * Require sectors 1-18 to be zero. This is deliberately
+     * conservative, but does not prove the whole disk is empty.
      */
     for (lba = 1U; lba <= 18U; lba++) {
-        if (!ata_read_sector(lba, sector)) {
+        if (!ata_read_sector_at(device, lba, sector)) {
             terminal_writeline("SAFETY STOP: Cannot inspect LBA.");
             terminal_write("LBA: ");
             setup_print_u32(lba);
@@ -268,11 +263,8 @@ static void installer_install_target(
         }
     }
 
-    /*
-     * Recheck every sector that the installer will overwrite.
-     */
     if (setup_check_planned_write_sectors(
-            info->addressable_sectors) != 1) {
+            device, info->addressable_sectors) != 1) {
         terminal_writeline("SAFETY STOP: Reserved-sector check failed.");
         terminal_writeline("Target was not approved for installation.");
         goto failed;
@@ -284,6 +276,7 @@ static void installer_install_target(
 
     for (i = 0; i < INSTALLER_STAGE2_SECTORS; i++) {
         if (!installer_write_verified_sector(
+                device,
                 INSTALLER_STAGE2_LBA + i,
                 installer_stage2_start + i * ATA_SECTOR_SIZE)) {
             goto failed;
@@ -295,6 +288,7 @@ static void installer_install_target(
 
     for (i = 0; i < INSTALLER_KERNEL_SECTORS; i++) {
         if (!installer_write_verified_sector(
+                device,
                 INSTALLER_KERNEL_LBA + i,
                 installer_kernel_start + i * ATA_SECTOR_SIZE)) {
             goto failed;
@@ -305,8 +299,7 @@ static void installer_install_target(
     terminal_writeline("Writing boot sector last...");
 
     if (!installer_write_verified_sector(
-            INSTALLER_BOOT_LBA,
-            installer_boot_start)) {
+            device, INSTALLER_BOOT_LBA, installer_boot_start)) {
         goto failed;
     }
 
@@ -314,7 +307,7 @@ static void installer_install_target(
     terminal_writeline("INSTALLATION COMPLETED.");
     terminal_writeline("All written sectors passed read-back verification.");
     terminal_writeline("");
-    terminal_writeline("Power off your computer, detach the installer ISO,");
+    terminal_writeline("Power off, detach the installer ISO,");
     terminal_writeline("and boot from the installed hard disk.");
 
     for (;;) {
@@ -334,10 +327,9 @@ failed:
 
 #endif
 
-
 static void setup_inspect_selected_disk(
-    const ata_device_info_t *info
-)
+    uint32_t device,
+    const ata_device_info_t *info)
 {
     uint8_t sector[ATA_SECTOR_SIZE];
     uint32_t sectors;
@@ -350,12 +342,14 @@ static void setup_inspect_selected_disk(
     terminal_writeline("NPT-DOS SETUP: TARGET INSPECTION");
     terminal_writeline("--------------------------------");
     terminal_writeline("");
-    terminal_writeline("Selected target: Primary Master");
+
+    terminal_write("Selected target: ");
+    terminal_writeline(setup_device_name(device));
 
     terminal_write("Model: ");
     terminal_writeline(
-        info->model[0] != '\0' ? info->model : "(not reported)"
-    );
+        info->model[0] != '\0' ? info->model : "(not reported)");
+
     terminal_writeline("");
 
     sectors = info->addressable_sectors;
@@ -363,8 +357,6 @@ static void setup_inspect_selected_disk(
     if (sectors == 0U) {
         terminal_writeline("Capacity: Unknown");
         terminal_writeline("SAFETY STOP: Capacity unavailable.");
-        terminal_writeline("Target inspection cannot continue.");
-        terminal_writeline("");
         terminal_writeline("No disk writes were performed.");
         terminal_writeline("Press any key to return.");
         setup_wait_for_key();
@@ -393,10 +385,8 @@ static void setup_inspect_selected_disk(
     terminal_writeline("Addressing: ATA LBA28");
     terminal_writeline("");
 
-    read_ok = ata_read_sector(
-        NPTFS_SUPERBLOCK_LBA,
-        sector
-    );
+    read_ok = ata_read_sector_at(
+        device, NPTFS_SUPERBLOCK_LBA, sector);
 
     if (!read_ok) {
         terminal_writeline("NPTFS status: Cannot read sector 1.");
@@ -413,7 +403,8 @@ static void setup_inspect_selected_disk(
     terminal_writeline("");
     terminal_writeline("Checking planned overwrite sectors...");
 
-    overwrite_check = setup_check_planned_write_sectors(sectors);
+    overwrite_check =
+        setup_check_planned_write_sectors(device, sectors);
 
     if (overwrite_check == 1) {
         terminal_writeline("Reserved sectors: All zero.");
@@ -425,116 +416,154 @@ static void setup_inspect_selected_disk(
         terminal_writeline("Reserved sectors: CHECK FAILED.");
         terminal_writeline("SAFETY STOP: Cannot approve target.");
     }
-    
-    #ifdef NPT_INSTALLER_BUILD
-        if (read_ok &&
-            !setup_has_nptfs_signature(sector) &&
-            setup_sector_is_zero(sector) &&
-            overwrite_check == 1 &&
-            info->addressable_sectors >= 320U) {
 
-            char key;
+#ifdef NPT_INSTALLER_BUILD
+    if (read_ok &&
+        !setup_has_nptfs_signature(sector) &&
+        setup_sector_is_zero(sector) &&
+        overwrite_check == 1 &&
+        info->addressable_sectors >= 320U) {
 
+        char key;
+
+        terminal_writeline("");
+        terminal_writeline("WARNING: Installation writes disk sectors.");
+        terminal_writeline("A clean scan does not prove the entire disk is empty.");
+        terminal_writeline("Use only a new, disposable test disk.");
+        terminal_writeline("");
+        terminal_writeline("Press I to continue to confirmation.");
+        terminal_writeline("Press any other key to cancel.");
+
+        key = keyboard_getchar();
+
+        if (key == 'i' || key == 'I') {
+            terminal_clear();
+            terminal_writeline("FINAL INSTALLATION CONFIRMATION");
+            terminal_writeline("--------------------------------");
             terminal_writeline("");
-            terminal_writeline("WARNING: Installation will write disk sectors.");
-            terminal_writeline("A clean scan does not prove the entire disk is empty.");
-            terminal_writeline("Use only a new, disposable hard disk if provided.");
+
+            terminal_write("Target: ");
+            terminal_writeline(setup_device_name(device));
+
+            terminal_writeline("Will overwrite LBAs 0, 32-47, and 64-319.");
+            terminal_writeline("Will not write LBAs 1-18.");
             terminal_writeline("");
-            terminal_writeline("Press I to continue to confirmation.");
-            terminal_writeline("Press any other key to cancel.");
+            terminal_writeline("Type Y to authorize installation.");
+            terminal_writeline("Any other key cancels.");
 
             key = keyboard_getchar();
 
-            if (key == 'i' || key == 'I') {
-                terminal_clear();
-                terminal_writeline("FINAL INSTALLATION CONFIRMATION");
-                terminal_writeline("--------------------------------");
+            if (key == 'y' || key == 'Y') {
+                installer_install_target(device, info);
+            } else {
                 terminal_writeline("");
-                terminal_writeline("Target: Primary Master ATA disk");
-                terminal_writeline("Will overwrite LBAs 0, 32-47, and 64-319.");
-                terminal_writeline("Will not write LBAs 1-18.");
-                terminal_writeline("");
-                terminal_writeline("Type Y to authorize installation.");
-                terminal_writeline("Any other key cancels.");
-
-                key = keyboard_getchar();
-
-                if (key == 'y' || key == 'Y') {
-                    installer_install_target(info);
-                } else {
-                    terminal_writeline("");
-                    terminal_writeline("Installation cancelled.");
-                    setup_wait_for_key();
-                }
+                terminal_writeline("Installation cancelled.");
+                setup_wait_for_key();
             }
-        } else {
-            terminal_writeline("");
-            terminal_writeline("INSTALLATION BLOCKED.");
-            terminal_writeline("The target did not pass all safety checks.");
-            terminal_writeline("No disk writes were performed.");
-            terminal_writeline("");
-            terminal_writeline("Press any key to return.");
-            setup_wait_for_key();
         }
-    #else
+    } else {
         terminal_writeline("");
-        terminal_writeline("INSTALLATION: DISABLED IN BASE KERNEL");
-        terminal_writeline("This build performs inspection only.");
+        terminal_writeline("INSTALLATION BLOCKED.");
+        terminal_writeline("The target did not pass all safety checks.");
         terminal_writeline("No disk writes were performed.");
         terminal_writeline("");
         terminal_writeline("Press any key to return.");
         setup_wait_for_key();
-    #endif
+    }
+#else
+    terminal_writeline("");
+    terminal_writeline("INSTALLATION: DISABLED IN BASE KERNEL");
+    terminal_writeline("This build performs inspection only.");
+    terminal_writeline("No disk writes were performed.");
+    terminal_writeline("");
+    terminal_writeline("Press any key to return.");
+    setup_wait_for_key();
+#endif
 }
 
 static void setup_select_disk(void)
 {
-    ata_device_info_t info;
+    ata_device_info_t devices[ATA_MAX_DEVICES];
+    uint32_t i;
+    uint32_t found;
 
     for (;;) {
         char key;
+        int selected;
 
         terminal_clear();
         terminal_writeline("NPT-DOS SETUP: SELECT TARGET");
         terminal_writeline("----------------------------");
         terminal_writeline("");
-        terminal_writeline("Detecting supported ATA device...");
+        terminal_writeline("Detecting legacy IDE ATA devices...");
         terminal_writeline("");
 
-        if (!ata_initialize() || !ata_get_device_info(&info)) {
-            terminal_writeline("No supported primary-master ATA disk");
-            terminal_writeline("was detected by the current driver.");
+        if (!ata_initialize()) {
+            terminal_writeline("No supported ATA disks were detected.");
             terminal_writeline("");
             terminal_writeline("No disk writes were performed.");
-            terminal_writeline("");
             terminal_writeline("Press any key to return to setup.");
             setup_wait_for_key();
             return;
         }
 
-        terminal_writeline("Detected target:");
-        terminal_writeline("");
-        terminal_writeline("  1. Primary Master");
-        terminal_write("     Model: ");
-        terminal_writeline(
-            info.model[0] != '\0' ? info.model : "(not reported)"
-        );
+        found = 0;
 
-        terminal_write("     Addressable sectors: ");
-        setup_print_u32(info.addressable_sectors);
-        terminal_writeline("");
+        for (i = 0; i < ATA_MAX_DEVICES; i++) {
+            if (ata_get_device_info_at(i, &devices[i])) {
+                found++;
+                terminal_write("  ");
+                setup_print_u32(i + 1U);
+                terminal_write(". ");
+                terminal_writeline(setup_device_name(i));
+
+                terminal_write("     Model: ");
+                terminal_writeline(
+                    devices[i].model[0] != '\0'
+                        ? devices[i].model
+                        : "(not reported)");
+
+                terminal_write("     Addressable sectors: ");
+                setup_print_u32(devices[i].addressable_sectors);
+                terminal_writeline("");
+            }
+        }
+
+        if (found == 0U) {
+            terminal_writeline("No usable ATA disks were detected.");
+            terminal_writeline("Press any key to return to setup.");
+            setup_wait_for_key();
+            return;
+        }
 
         terminal_writeline("");
-        terminal_writeline("Press 1 to inspect this target.");
+        terminal_writeline("Select a disk by its number.");
+        terminal_writeline("Press R to rescan devices.");
         terminal_writeline("Press Q to return to the main setup menu.");
 
         key = keyboard_getchar();
 
-        if (key == '1') {
-            setup_inspect_selected_disk(&info);
-        } else if (key == 'q' || key == 'Q') {
+        if (key == 'q' || key == 'Q')
             return;
+
+        if (key == 'r' || key == 'R')
+            continue;
+
+        if (key < '1' || key > '4')
+            continue;
+
+        selected = (int)(key - '1');
+
+        if (!ata_get_device_info_at(
+                (uint32_t)selected, &devices[selected])) {
+            terminal_writeline("");
+            terminal_writeline("That device is no longer available.");
+            setup_wait_for_key();
+            continue;
         }
+
+        setup_inspect_selected_disk(
+            (uint32_t)selected, &devices[selected]);
     }
 }
 
