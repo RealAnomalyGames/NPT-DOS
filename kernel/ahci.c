@@ -69,6 +69,11 @@
 /* ATA commands */
 #define ATA_CMD_IDENTIFY_DEVICE 0xEC
 #define ATA_CMD_READ_DMA_EXT    0x25
+#define ATA_CMD_WRITE_DMA_EXT  0x35
+#define ATA_CMD_FLUSH_CACHE_EXT 0xEA
+
+/* AHCI command-header write direction. */
+#define AHCI_CMD_HEADER_WRITE (1u << 6)
 
 #define AHCI_MMIO_REQUIRED_SIZE 0x1100u
 #define AHCI_POLL_LIMIT         10000000u
@@ -152,6 +157,15 @@ static ahci_port_info_t
     ports[AHCI_MAX_CONTROLLERS][AHCI_MAX_PORTS];
 
 static uint32_t controller_count;
+
+/*
+ * A failed port is no longer used for I/O.
+ * If its engine cannot be stopped, the shared DMA workspace is unsafe
+ * for every port, so all further commands are rejected.
+ */
+static uint8_t port_flush_ext_supported[AHCI_MAX_CONTROLLERS][AHCI_MAX_PORTS];
+static uint8_t port_faulted[AHCI_MAX_CONTROLLERS][AHCI_MAX_PORTS];
+static int dma_workspace_unsafe;
 
 /* One serialized DMA workspace, shared by all ports. */
 static ahci_command_list_t dma_command_list;
@@ -391,6 +405,19 @@ static int ahci_prepare_port(uint32_t controller_index,
     uint16_t pci_command;
     uint32_t i;
 
+    if (dma_workspace_unsafe ||
+        controller_index >= controller_count ||
+        port_number >= AHCI_MAX_PORTS) {
+        return 0;
+    }
+
+    if (port_faulted[controller_index][port_number] ||
+        !ports[controller_index][port_number].detected ||
+        ports[controller_index][port_number].device_type !=
+            AHCI_DEVICE_SATA) {
+        return 0;
+    }
+    
     if (controller_index >= controller_count ||
         port_number >= AHCI_MAX_PORTS) {
         return 0;
@@ -469,6 +496,8 @@ static int ahci_prepare_port(uint32_t controller_index,
     }
 
     if (!stop_port_engine(controller_index, port_number)) {
+        port_faulted[controller_index][port_number] = 1;
+        dma_workspace_unsafe = 1;
         return 0;
     }
 
@@ -508,6 +537,23 @@ static int ahci_prepare_port(uint32_t controller_index,
     return start_port_engine(controller_index, port_number);
 }
 
+static int ahci_fail_command(uint32_t controller_index,
+                             uint32_t port_number)
+{
+    port_faulted[controller_index][port_number] = 1;
+
+    /*
+     * Do not reuse the global DMA workspace unless both command
+     * and FIS engines have stopped successfully.
+     */
+    if (!stop_port_engine(controller_index, port_number)) {
+        dma_workspace_unsafe = 1;
+        return 0;
+    }
+
+    return 0;
+}
+
 static int ahci_issue_command(uint32_t controller_index,
                               uint32_t port_number,
                               uint8_t command,
@@ -523,13 +569,46 @@ static int ahci_issue_command(uint32_t controller_index,
     uint32_t i;
     uint32_t status;
     uint32_t interrupt_status;
+    int has_data;
+    int is_write;
+    int is_flush;
 
-    if (!buffer || sector_count == 0) {
+    is_flush = (!identify &&
+                command == ATA_CMD_FLUSH_CACHE_EXT);
+
+    is_write = (!identify &&
+                command == ATA_CMD_WRITE_DMA_EXT);
+
+    has_data = !is_flush;
+
+    if (controller_index >= controller_count ||
+        port_number >= AHCI_MAX_PORTS ||
+        dma_workspace_unsafe ||
+        port_faulted[controller_index][port_number]) {
         return 0;
     }
 
-    if (!dma_address_valid(buffer,
-                           (uint32_t)sector_count * AHCI_SECTOR_SIZE)) {
+    if (identify) {
+        if (command != ATA_CMD_IDENTIFY_DEVICE ||
+            sector_count != 1 || !buffer) {
+            return 0;
+        }
+    } else if (is_flush) {
+        if (sector_count != 0 || buffer != 0 ||
+            !port_flush_ext_supported[controller_index][port_number]) {
+            return 0;
+        }
+    } else {
+        if ((command != ATA_CMD_READ_DMA_EXT &&
+             command != ATA_CMD_WRITE_DMA_EXT) ||
+            sector_count != 1 || !buffer ||
+            lba > 0x0000FFFFFFFFFFFFull) {
+            return 0;
+        }
+    }
+
+    if (has_data &&
+        !dma_address_valid(buffer, AHCI_SECTOR_SIZE)) {
         return 0;
     }
 
@@ -538,7 +617,7 @@ static int ahci_issue_command(uint32_t controller_index,
     }
 
     if (!wait_port_ready(controller_index, port_number)) {
-        return 0;
+        return ahci_fail_command(controller_index, port_number);
     }
 
     header = &dma_command_list.command_list[0];
@@ -551,26 +630,28 @@ static int ahci_issue_command(uint32_t controller_index,
     }
 
     header->command_fis_length = 5;
-    header->flags = 0;
-    header->prdt_length = 1;
+    header->flags = is_write ? AHCI_CMD_HEADER_WRITE : 0;
+    header->prdt_length = has_data ? 1 : 0;
     header->transferred_bytes = 0;
-    header->command_table_base =
-        (uint32_t)(uintptr_t)table;
+    header->command_table_base = (uint32_t)(uintptr_t)table;
     header->command_table_base_upper = 0;
 
-    fis->fis_type = 0x27; /* Register Host-to-Device FIS */
-    fis->port_multiplier_and_flags = 0x80; /* Command bit */
+    fis->fis_type = 0x27;
+    fis->port_multiplier_and_flags = 0x80;
 
     if (identify) {
         fis->command = ATA_CMD_IDENTIFY_DEVICE;
         fis->device = 0;
+    } else if (is_flush) {
+        /*
+         * FLUSH CACHE EXT has no data phase:
+         * no PRDT entry, no buffer, and a zero sector count.
+         */
+        fis->command = ATA_CMD_FLUSH_CACHE_EXT;
+        fis->device = 0;
     } else {
-        if (lba > 0x0000FFFFFFFFFFFFull) {
-            return 0;
-        }
-
-        fis->command = ATA_CMD_READ_DMA_EXT;
-        fis->device = 1u << 6; /* LBA mode */
+        fis->command = command;
+        fis->device = 1u << 6;
 
         fis->lba0 = (uint8_t)lba;
         fis->lba1 = (uint8_t)(lba >> 8);
@@ -583,18 +664,14 @@ static int ahci_issue_command(uint32_t controller_index,
         fis->count_high = (uint8_t)(sector_count >> 8);
     }
 
-    prdt->data_base = (uint32_t)(uintptr_t)buffer;
-    prdt->data_base_upper = 0;
-    prdt->reserved = 0;
-    prdt->byte_count_and_interrupt =
-        ((uint32_t)sector_count * AHCI_SECTOR_SIZE - 1u)
-        | (1u << 31);
+    if (has_data) {
+        prdt->data_base = (uint32_t)(uintptr_t)buffer;
+        prdt->data_base_upper = 0;
+        prdt->reserved = 0;
+        prdt->byte_count_and_interrupt =
+            (AHCI_SECTOR_SIZE - 1u) | (1u << 31);
+    }
 
-    /*
-     * Clear old port status before issuing the command. A completion
-     * is successful only if slot zero clears and the task-file error
-     * and task-file error interrupt remain clear.
-     */
     port_write(controller_index, port_number, PX_IS, 0xFFFFFFFFu);
     port_write(controller_index, port_number, PX_SERR, 0xFFFFFFFFu);
 
@@ -609,7 +686,9 @@ static int ahci_issue_command(uint32_t controller_index,
 
         if ((status & ATA_STATUS_ERR) ||
             (interrupt_status & PX_IS_TFES)) {
-            return 0;
+            return ahci_fail_command(
+                controller_index, port_number
+            );
         }
 
         if ((port_read(controller_index, port_number, PX_CI) & 1u)
@@ -623,20 +702,38 @@ static int ahci_issue_command(uint32_t controller_index,
                 controller_index, port_number, PX_IS
             );
 
-            if ((status & ATA_STATUS_ERR) ||
+            if ((status & (ATA_STATUS_ERR |
+                           ATA_STATUS_BSY |
+                           ATA_STATUS_DRQ)) ||
                 (interrupt_status & PX_IS_TFES)) {
-                return 0;
+                return ahci_fail_command(
+                    controller_index, port_number
+                );
             }
 
             return 1;
         }
     }
 
-    return 0;
+    /* Timed out: stop the engine before permitting DMA-buffer reuse. */
+    return ahci_fail_command(controller_index, port_number);
 }
 
 int ahci_initialize(void)
 {
+    port_flush_ext_supported[i][port_number] = 0;
+    dma_workspace_unsafe = 0;
+
+    port_faulted[i][port_number] = 0;
+    port_flush_ext_supported[i][port_number] = 0;
+
+    for (i = 0; i < AHCI_MAX_CONTROLLERS; ++i) {
+        for (port_number = 0; port_number < AHCI_MAX_PORTS;
+             ++port_number) {
+            port_faulted[i][port_number] = 0;
+        }
+    }
+    
     uint32_t i;
     uint32_t port_number;
     uint32_t count;
@@ -647,8 +744,7 @@ int ahci_initialize(void)
     uint32_t ssts;
     uint32_t signature;
     uint32_t task_file;
-    uint32_t command;
-    pci_ahci_controller_t pci_controller;
+    uint32_t command
     uint16_t pci_command;
 
     controller_count = 0;
@@ -674,10 +770,6 @@ int ahci_initialize(void)
     terminal_writeline("Initializing AHCI discovery...");
 
     for (i = 0; i < count; ++i) {
-        if (!pci_get_ahci_controller(i, &pci_controller)) {
-            continue;
-        }
-
         if (pci_controller.bar5 == 0 ||
             pci_controller.bar5 == 0xFFFFFFFFu ||
             (pci_controller.bar5 & 1u) ||
@@ -699,9 +791,9 @@ int ahci_initialize(void)
         }
 
         pci_command = pci_read_config16(
-            pci_controller.bus,
-            pci_controller.device,
-            pci_controller.function,
+            controllers[controller_index].bus,
+            controllers[controller_index].device,
+            controllers[controller_index].function,
             PCI_COMMAND_REGISTER
         );
 
@@ -871,6 +963,14 @@ int ahci_identify_device(uint32_t controller_index,
     copy_identify_model(port->model, identify_words);
     port->identified = 1;
 
+    /*
+     * Word 83's command-set bits are valid only when bits 15:14
+     * equal 01b. Bit 12 advertises FLUSH CACHE EXT.
+     */
+    port_flush_ext_supported[controller_index][port_number] =
+        ((identify_words[83] & 0xC000u) == 0x4000u) &&
+        ((identify_words[83] & (1u << 12)) != 0);
+
     return 1;
 }
 
@@ -917,4 +1017,72 @@ int ahci_read_sector(uint32_t controller_index,
     }
 
     return 1;
+}
+
+int ahci_flush_cache(uint32_t controller_index,
+                     uint32_t port_number)
+{
+    if (controller_index >= controller_count ||
+        port_number >= AHCI_MAX_PORTS ||
+        !ports[controller_index][port_number].identified ||
+        !port_flush_ext_supported[controller_index][port_number]) {
+        return 0;
+    }
+
+    return ahci_issue_command(
+        controller_index,
+        port_number,
+        ATA_CMD_FLUSH_CACHE_EXT,
+        0,
+        0,
+        0,
+        0
+    );
+}
+
+int ahci_write_sector(uint32_t controller_index,
+                      uint32_t port_number,
+                      uint64_t lba,
+                      const uint8_t *buffer)
+{
+    ahci_port_info_t *port;
+
+    if (!buffer ||
+        controller_index >= controller_count ||
+        port_number >= AHCI_MAX_PORTS ||
+        dma_workspace_unsafe ||
+        port_faulted[controller_index][port_number]) {
+        return 0;
+    }
+
+    port = &ports[controller_index][port_number];
+
+    if (!port->identified ||
+        lba >= port->sector_count ||
+        !port_flush_ext_supported[controller_index][port_number]) {
+        return 0;
+    }
+
+    /*
+     * DMA reads the source buffer directly for a write.
+     * The caller's buffer must remain valid until this synchronous
+     * operation returns. The kernel currently uses identity mapping.
+     */
+    if (!ahci_issue_command(
+            controller_index,
+            port_number,
+            ATA_CMD_WRITE_DMA_EXT,
+            lba,
+            1,
+            (uint8_t *)(uintptr_t)buffer,
+            0)) {
+        return 0;
+    }
+
+    /*
+     * Report success only after the drive confirms its cache flush.
+     * A flush failure means the sector may have been written, but
+     * durable completion has not been confirmed.
+     */
+    return ahci_flush_cache(controller_index, port_number);
 }
