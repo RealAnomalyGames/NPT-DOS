@@ -212,7 +212,6 @@ static void setup_draw_screen(void)
     terminal_writeline("|    Read-only controller and port inspection. |");
     terminal_writeline("|    Does not install or write to disks.       |");
     terminal_writeline("+----------------------------------------------+");
-    terminal_writeline("");
     terminal_writeline("Press 1, 2, or 3 to select an option.");
     terminal_writeline("Press Q to exit setup.");
 }
