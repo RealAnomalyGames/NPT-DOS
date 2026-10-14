@@ -107,14 +107,14 @@ $(BUILD_DIR)/ahci.o: kernel/ahci.c kernel/ahci.h kernel/pci.h kernel/terminal.h 
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/setup.o: kernel/setup.c \
-	kernel/setup.h kernel/keyboard.h kernel/terminal.h kernel/ata.h \
+	kernel/setup.h kernel/keyboard.h kernel/terminal.h \
+	kernel/ata.h kernel/ahci.h kernel/storage.h \
 	| $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-# Separate installer build of setup.c.
-# Installer-specific behavior can be added without changing the base kernel.
 $(BUILD_DIR)/setup_installer.o: kernel/setup.c \
-	kernel/setup.h kernel/keyboard.h kernel/terminal.h kernel/ata.h \
+	kernel/setup.h kernel/keyboard.h kernel/terminal.h \
+	kernel/ata.h kernel/ahci.h kernel/storage.h \
 	| $(BUILD_DIR)
 	$(CC) $(CFLAGS) -DNPT_INSTALLER_BUILD -c $< -o $@
 
