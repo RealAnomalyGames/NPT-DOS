@@ -406,7 +406,7 @@ static void installer_install_target(
     }
 
     if (setup_check_planned_write_sectors(
-            device, info->addressable_sectors) != 1) {
+            device, info->sector_count) != 1) {
         terminal_writeline("SAFETY STOP: Reserved-sector check failed.");
         terminal_writeline("Target was not approved for installation.");
         goto failed;
@@ -474,7 +474,7 @@ static void setup_inspect_selected_disk(
     const storage_device_info_t *info)
 {
     uint8_t sector[ATA_SECTOR_SIZE];
-    uint32_t sectors;
+    uint64_t sectors;
     uint32_t mib_whole;
     uint32_t mib_fraction;
     int read_ok;
@@ -495,7 +495,7 @@ static void setup_inspect_selected_disk(
 
     terminal_writeline("");
 
-    sectors = info->addressable_sectors;
+    sectors = info->sector_count;
 
     if (sectors == 0U) {
         terminal_writeline("Capacity: Unknown");
@@ -509,13 +509,6 @@ static void setup_inspect_selected_disk(
     terminal_write("Addressable sectors: ");
     setup_print_u32((uint32_t)sectors);
     terminal_writeline("");
-
-    if (info->lba28_sectors == 0U) {
-        terminal_writeline("Not reported");
-    } else {
-        setup_print_u32(info->lba28_sectors);
-        terminal_writeline("");
-    }
 
     mib_whole = sectors / 2048U;
     mib_fraction = ((sectors % 2048U) * 10U) / 2048U;
