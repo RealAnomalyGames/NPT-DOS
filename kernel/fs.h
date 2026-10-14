@@ -1,6 +1,8 @@
 #ifndef NPT_DOS_FS_H
 #define NPT_DOS_FS_H
 
+#include <stdint.h>
+
 #define FS_MAX_FILES 16
 #define FS_NAME_MAX 15
 #define FS_CONTENT_MAX 255
@@ -22,6 +24,7 @@ typedef enum {
     FS_IO_ERROR
 } fs_result_t;
 
+/* Existing filesystem API. */
 void fs_initialize(void);
 int fs_is_ready(void);
 fs_result_t fs_format(void);
@@ -38,5 +41,11 @@ int fs_file_size(const char *name);
 
 int fs_get_attributes(const char *name);
 fs_result_t fs_set_attributes(const char *name, int attributes);
+
+/* Device-aware filesystem API. */
+int fs_select_device(uint32_t device_id);
+int fs_get_device_id(uint32_t *device_id);
+int fs_initialize_device(uint32_t device_id);
+fs_result_t fs_format_device(uint32_t device_id);
 
 #endif
