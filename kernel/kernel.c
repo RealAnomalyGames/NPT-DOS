@@ -222,9 +222,9 @@ static void command_help(char *arguments)
         terminal_writeline("FREE                    Available storage");
         terminal_writeline("FSINFO                  Filesystem information");
         terminal_writeline("FORMAT CONFIRM          Format the NPTFS disk");
-        terminal_writeline("DISKS                   List detected storage devices")
-        terminal_writeline("FSSELECT <id>           Mount an existing NPTFS filesystem")
-        terminal_writeline("FORMAT <id> CONFIRM     Format the specified storage device")
+        terminal_writeline("DISKS                   List detected storage devices");
+        terminal_writeline("FSSELECT <id>           Mount an existing NPTFS filesystem");
+        terminal_writeline("FORMAT <id> CONFIRM     Format the specified storage device");
         terminal_writeline("EXIT                    Display exit information");
         terminal_writeline("");
         terminal_writeline("Use HELP <command> for details.");
@@ -753,7 +753,6 @@ static void command_disks(void)
     for (i = 0; i < count; i++) {
         storage_device_info_t info;
         char line[128];
-        char number[21];
         uint64_t value;
         uint32_t n = 0;
         uint32_t j;
@@ -840,6 +839,35 @@ static void command_disks(void)
     terminal_writeline("Use FSSELECT <id> to mount NPTFS.");
 }
 
+static int shell_parse_device_id(const char *text, uint32_t *result)
+{
+    uint32_t value = 0;
+
+    if (text == NULL || *text == '\0' || result == NULL) {
+        return 0;
+    }
+
+    while (*text != '\0') {
+        uint32_t digit;
+
+        if (*text < '0' || *text > '9') {
+            return 0;
+        }
+
+        digit = (uint32_t)(*text - '0');
+
+        if (value > (UINT32_MAX - digit) / 10U) {
+            return 0;
+        }
+
+        value = value * 10U + digit;
+        text++;
+    }
+
+    *result = value;
+    return 1;
+}
+
 static void command_fsselect(char *arguments)
 {
     char *id_token = take_token(&arguments);
@@ -885,8 +913,7 @@ static void command_fsselect(char *arguments)
 
 static void command_format(char *arguments)
 {
-    char *cursor = arguments;
-    char *id_token;
+    char *id_token = take_token(&arguments);
     char *confirmation;
     uint32_t device_id;
     uint32_t i;
@@ -894,24 +921,17 @@ static void command_format(char *arguments)
     int found = 0;
     fs_result_t result;
 
-    id_token = shell_next_token(&cursor);
-    confirmation = shell_next_token(&cursor);
+    arguments = skip_spaces(arguments);
+    confirmation = take_token(&arguments);
+    arguments = skip_spaces(arguments);
 
-    if (id_token == NULL ||
-        confirmation == NULL ||
-        shell_next_token(&cursor) != NULL ||
+    if (*id_token == '\0' ||
+        *confirmation == '\0' ||
+        *arguments != '\0' ||
         !shell_parse_device_id(id_token, &device_id) ||
-        confirmation[0] == '\0' ||
-        confirmation[0] != 'C' ||
-        confirmation[1] != 'O' ||
-        confirmation[2] != 'N' ||
-        confirmation[3] != 'F' ||
-        confirmation[4] != 'I' ||
-        confirmation[5] != 'R' ||
-        confirmation[6] != 'M' ||
-        confirmation[7] != '\0') {
+        !string_equals_ignore_case(confirmation, "CONFIRM")) {
         terminal_writeline("Usage: FORMAT <id> CONFIRM");
-        terminal_writeline("WARNING: Formatting destroys existing data.");
+        terminal_writeline("WARNING: Formatting erases existing NPTFS data.");
         return;
     }
 
