@@ -89,18 +89,6 @@ When reporting a problem, include:
 
 Do not include passwords, private information, or other sensitive data in public reports.
 
-## Project Information
-
-Detail	Information
-Product	NPT-DOS
-Version	1.0
-Developer	Neptune Corporation
-Architecture	32-bit x86
-Interface	Command-line
-Filesystem	NPTFS
-Distribution	Free
-License	Proprietary, source-available
-
 
 #### NPT-DOS 1.0
 Developed and published by Neptune Corporation™.
