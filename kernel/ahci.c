@@ -199,10 +199,26 @@ int ahci_initialize(void)
 
     terminal_writeline("AHCI: inspecting SATA controllers...");
 
-    for (i = 0; i < found && controller_count < AHCI_MAX_CONTROLLERS; ++i) {
+    for (i = 0; i < found &&
+            controller_count < AHCI_MAX_CONTROLLERS; ++i) {
         ahci_controller_info_t *info;
+        uint16_t pci_command;
 
         if (!pci_get_ahci_controller(i, &pci_info)) {
+            continue;
+        }
+
+        pci_command = pci_read_config16(
+            pci_info.bus,
+            pci_info.device,
+            pci_info.function,
+            PCI_REG_COMMAND
+        );
+
+        if ((pci_command & PCI_COMMAND_MEMORY) == 0) {
+            terminal_writeline(
+                "AHCI: PCI memory-space decoding is disabled; skipping."
+            );
             continue;
         }
 
