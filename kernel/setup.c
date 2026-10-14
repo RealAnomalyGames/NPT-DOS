@@ -351,7 +351,7 @@ static int installer_write_verified_sector(
 
 static void installer_install_target(
     uint32_t device,
-    const ata_device_info_t *info)
+    const storage_device_info_t *info)
 {
     uint8_t sector[ATA_SECTOR_SIZE];
     uint32_t lba;
@@ -471,7 +471,7 @@ failed:
 
 static void setup_inspect_selected_disk(
     uint32_t device,
-    const ata_device_info_t *info)
+    const storage_device_info_t *info)
 {
     uint8_t sector[ATA_SECTOR_SIZE];
     uint32_t sectors;
