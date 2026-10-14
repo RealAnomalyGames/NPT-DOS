@@ -178,6 +178,11 @@ static void mmio_write32(uint32_t base,
     *address = value;
 }
 
+static uint32_t read_physical32(uint32_t address)
+{
+    return *(volatile uint32_t *)(uintptr_t)address;
+}
+
 static uint32_t port_register(uint32_t controller_index,
                               uint32_t port_number,
                               uint32_t offset)
