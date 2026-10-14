@@ -338,10 +338,6 @@ static void command_help(char *arguments)
     } else if (string_equals_ignore_case(topic, "FSINFO")) {
         terminal_writeline("FSINFO");
         terminal_writeline("Displays NPTFS status and limits.");
-    } else if (string_equals_ignore_case(topic, "FORMAT")) {
-        terminal_writeline("FORMAT CONFIRM");
-        terminal_writeline("Destructively formats the NPTFS data area.");
-        terminal_writeline("WARNING: Existing NPTFS files will be erased.");
     } else if (string_equals_ignore_case(topic, "EXIT")) {
         terminal_writeline("EXIT");
         terminal_writeline("Explains why there is no host prompt to return to.");
