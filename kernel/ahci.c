@@ -27,6 +27,11 @@
 #define AHCI_SIG_SEMB        0xC33C0101u
 #define AHCI_SIG_PM          0x96690101u
 
+#define PCI_REG_COMMAND          0x04
+#define PCI_COMMAND_MEMORY       0x0002u
+
+#define AHCI_MMIO_REQUIRED_SIZE  0x1100u
+
 static ahci_controller_info_t controllers[AHCI_MAX_CONTROLLERS];
 static ahci_port_info_t ports[AHCI_MAX_CONTROLLERS][AHCI_MAX_PORTS];
 static uint32_t controller_count;
@@ -176,6 +181,22 @@ int ahci_initialize(void)
 
     found = pci_ahci_controller_count();
 
+    uint16_t pci_command;
+
+    pci_command = pci_read_config16(
+        pci_info.bus,
+        pci_info.device,
+        pci_info.function,
+        PCI_REG_COMMAND
+    );
+
+    if ((pci_command & PCI_COMMAND_MEMORY) == 0) {
+        terminal_writeline(
+            "AHCI: PCI memory-space decoding is disabled; skipping."
+        );
+        continue;
+    }
+
     terminal_writeline("AHCI: inspecting SATA controllers...");
 
     for (i = 0; i < found && controller_count < AHCI_MAX_CONTROLLERS; ++i) {
@@ -190,6 +211,13 @@ int ahci_initialize(void)
         if (!ahci_bar5_get_base(raw_bar, &abar)) {
             terminal_writeline(
                 "AHCI: unsupported or invalid BAR5; skipping controller."
+            );
+            continue;
+        }
+
+        if (abar > 0xFFFFFFFFu - AHCI_MMIO_REQUIRED_SIZE) {
+            terminal_writeline(
+                "AHCI: MMIO register range overflows; skipping controller."
             );
             continue;
         }
