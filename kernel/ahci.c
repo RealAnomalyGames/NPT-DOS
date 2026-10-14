@@ -190,13 +190,6 @@ int ahci_initialize(void)
         PCI_REG_COMMAND
     );
 
-    if ((pci_command & PCI_COMMAND_MEMORY) == 0) {
-        terminal_writeline(
-            "AHCI: PCI memory-space decoding is disabled; skipping."
-        );
-        continue;
-    }
-
     terminal_writeline("AHCI: inspecting SATA controllers...");
 
     for (i = 0; i < found &&
