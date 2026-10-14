@@ -866,19 +866,6 @@ int ahci_initialize(void)
 
             if (signature == SATA_SIG_ATA) {
                 port->device_type = AHCI_DEVICE_SATA;
-
-                /*
-                 * Identify the disk immediately so the shared
-                 * storage API has its model and sector capacity.
-                 */
-                if (!ahci_identify_device(
-                        controller_count, port_number)) {
-                    terminal_write(
-                        "AHCI: SATA disk identification failed on port ");
-                    terminal_putchar(
-                        (char)('0' + (port_number % 10u)));
-                    terminal_putchar('\n');
-                }
             } else if (signature == SATA_SIG_ATAPI) {
                 port->device_type = AHCI_DEVICE_ATAPI;
             } else if (signature == SATA_SIG_SEMB) {
@@ -891,6 +878,34 @@ int ahci_initialize(void)
         }
 
         ++controller_count;
+
+        /*
+         * Identify SATA disks only after the controller has
+         * been added to the usable-controller list.
+         */
+        {
+            uint32_t identified_port;
+
+            for (identified_port = 0;
+                 identified_port < AHCI_MAX_PORTS;
+                 ++identified_port) {
+                ahci_port_info_t *detected_port =
+                    &ports[controller_count - 1u][identified_port];
+
+                if (detected_port->detected &&
+                    detected_port->device_type == AHCI_DEVICE_SATA) {
+                    if (!ahci_identify_device(
+                            controller_count - 1u,
+                            identified_port)) {
+                        terminal_write(
+                            "AHCI: SATA identification failed on port ");
+                        terminal_putchar(
+                            (char)('0' + (identified_port % 10u)));
+                        terminal_putchar('\n');
+                    }
+                }
+            }
+        }
     }
 
     terminal_write("Usable AHCI controllers: ");
