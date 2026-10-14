@@ -1,33 +1,51 @@
-#include <stdint.h>
-#include "ata.h"
 
-#define ATA_DATA       0x1F0
-#define ATA_ERROR      0x1F1
-#define ATA_SECCOUNT   0x1F2
-#define ATA_LBA0       0x1F3
-#define ATA_LBA1       0x1F4
-#define ATA_LBA2       0x1F5
-#define ATA_DRIVE      0x1F6
-#define ATA_STATUS     0x1F7
-#define ATA_COMMAND    0x1F7
-#define ATA_ALTSTATUS  0x3F6
+#define ATA_PRIMARY_IO       0x1F0
+#define ATA_PRIMARY_CTRL     0x3F6
 
-#define ATA_CMD_READ     0x20
-#define ATA_CMD_WRITE    0x30
-#define ATA_CMD_IDENTIFY 0xEC
-#define ATA_CMD_FLUSH    0xE7
+#define ATA_SECONDARY_IO     0x170
+#define ATA_SECONDARY_CTRL   0x376
 
-#define ATA_SR_ERR     0x01
-#define ATA_SR_DRQ     0x08
-#define ATA_SR_DF      0x20
-#define ATA_SR_BSY     0x80
+#define ATA_REG_DATA         0
+#define ATA_REG_ERROR        1
+#define ATA_REG_SECCOUNT     2
+#define ATA_REG_LBA0         3
+#define ATA_REG_LBA1         4
+#define ATA_REG_LBA2         5
+#define ATA_REG_DRIVE        6
+#define ATA_REG_STATUS       7
+#define ATA_REG_COMMAND      7
 
-#define ATA_TIMEOUT    1000000U
-#define ATA_MAX_LBA    0x0FFFFFFFU
-#define ATA_MAX_SECTORS 0x10000000U
+#define ATA_CMD_READ         0x20
+#define ATA_CMD_WRITE        0x30
+#define ATA_CMD_IDENTIFY     0xEC
+#define ATA_CMD_FLUSH        0xE7
+
+#define ATA_SR_ERR           0x01
+#define ATA_SR_DRQ           0x08
+#define ATA_SR_DF            0x20
+#define ATA_SR_BSY           0x80
+
+#define ATA_TIMEOUT          1000000U
+#define ATA_MAX_LBA          0x0FFFFFFFU
+#define ATA_MAX_SECTORS      0x10000000U
+
+typedef struct {
+    uint16_t io_base;
+    uint16_t ctrl_base;
+    uint8_t slave;
+} ata_channel_device_t;
+
+static const ata_channel_device_t ata_devices[ATA_MAX_DEVICES] = {
+    { ATA_PRIMARY_IO,   ATA_PRIMARY_CTRL,   0 },
+    { ATA_PRIMARY_IO,   ATA_PRIMARY_CTRL,   1 },
+    { ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, 0 },
+    { ATA_SECONDARY_IO, ATA_SECONDARY_CTRL, 1 }
+};
+
+static ata_device_info_t ata_info[ATA_MAX_DEVICES];
+static uint32_t ata_detected_count;
 
 static int ata_ready = 0;
-static ata_device_info_t ata_info;
 
 static inline void outb(uint16_t port, uint8_t value)
 {
@@ -164,6 +182,29 @@ static void ata_decode_identify(const uint16_t *identify)
     ata_info.detected = 1;
 }
 
+static uint8_t ata_read_reg(
+    const ata_channel_device_t *dev,
+    uint8_t reg)
+{
+    return inb((uint16_t)(dev->io_base + reg));
+}
+
+static void ata_write_reg(
+    const ata_channel_device_t *dev,
+    uint8_t reg,
+    uint8_t value)
+{
+    outb((uint16_t)(dev->io_base + reg), value);
+}
+
+static void ata_delay_400ns(
+    const ata_channel_device_t *dev)
+{
+    (void)inb(dev->ctrl_base);
+    (void)inb(dev->ctrl_base);
+    (void)inb(dev->ctrl_base);
+    (void)inb(dev->ctrl_base);
+}
 /*
  * Initialize the primary-master ATA device and cache its IDENTIFY data.
  * This function reads device information but does not write disk sectors.
@@ -372,4 +413,40 @@ int ata_write_sector(uint32_t lba, const uint8_t *buffer)
     outb(ATA_COMMAND, ATA_CMD_FLUSH);
 
     return ata_wait_complete();
+}
+
+
+uint32_t ata_device_count(void)
+{
+    return ata_detected_count;
+}
+
+int ata_get_device_info_at(
+    uint32_t device,
+    ata_device_info_t *info)
+{
+    uint32_t i;
+
+    if (info == 0 || device >= ATA_MAX_DEVICES)
+        return 0;
+
+    if (!ata_info[device].detected)
+        return 0;
+
+    info->detected = ata_info[device].detected;
+    info->lba28_sectors =
+        ata_info[device].lba28_sectors;
+    info->addressable_sectors =
+        ata_info[device].addressable_sectors;
+
+    for (i = 0; i < sizeof(info->model); i++)
+        info->model[i] = ata_info[device].model[i];
+
+    return 1;
+}
+
+/* Preserve the old API's primary-master behavior. */
+int ata_get_device_info(ata_device_info_t *info)
+{
+    return ata_get_device_info_at(0, info);
 }
