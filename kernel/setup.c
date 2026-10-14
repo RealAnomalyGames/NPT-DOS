@@ -14,11 +14,15 @@
 static const char *setup_device_name(uint32_t device)
 {
     switch (device) {
-        case 0: return "Primary Master";
-        case 1: return "Primary Slave";
-        case 2: return "Secondary Master";
-        case 3: return "Secondary Slave";
-        default: return "Unknown";
+        case 0: return "Primary Master (IDE)";
+        case 1: return "Primary Slave (IDE)";
+        case 2: return "Secondary Master (IDE)";
+        case 3: return "Secondary Slave (IDE)";
+        default:
+            if (device >= STORAGE_SATA_ID_BASE) {
+                return "SATA/AHCI disk";
+            }
+            return "Unknown";
     }
 }
 
@@ -365,9 +369,7 @@ static void installer_install_target(
     terminal_writeline("");
     terminal_writeline("Performing final read-only checks...");
 
-    if (info == 0 ||
-        !info->detected ||
-        info->addressable_sectors < 320U) {
+    if (info == 0 || info->sector_count < 320U) {
         terminal_writeline("SAFETY STOP: Target capacity is insufficient.");
         goto failed;
     }
@@ -477,6 +479,7 @@ static void setup_inspect_selected_disk(
     uint32_t mib_whole;
     uint32_t mib_fraction;
     int read_ok;
+    int nptfs_found = 0;
     int overwrite_check;
 
     terminal_clear();
@@ -504,7 +507,9 @@ static void setup_inspect_selected_disk(
         return;
     }
 
-    terminal_write("Reported LBA28 sectors: ");
+    terminal_write("Addressable sectors: ");
+    setup_print_u32((uint32_t)sectors);
+    terminal_writeline("");
 
     if (info->lba28_sectors == 0U) {
         terminal_writeline("Not reported");
@@ -526,13 +531,14 @@ static void setup_inspect_selected_disk(
     terminal_writeline("Addressing: ATA LBA28");
     terminal_writeline("");
 
-    read_ok = ata_read_sector_at(
-        device, NPTFS_SUPERBLOCK_LBA, sector);
+    read_ok = storage_read_sector(
+    device, NPTFS_SUPERBLOCK_LBA, sector);
 
     if (!read_ok) {
         terminal_writeline("NPTFS status: Cannot read sector 1.");
         terminal_writeline("SAFETY STOP: Read failure.");
     } else if (setup_has_nptfs_signature(sector)) {
+        nptfs_found = 1;
         terminal_writeline("NPTFS status: Signature detected.");
         terminal_writeline("Existing NPTFS data may be present.");
         terminal_writeline("The filesystem will not be formatted.");
@@ -560,10 +566,9 @@ static void setup_inspect_selected_disk(
 
 #ifdef NPT_INSTALLER_BUILD
     if (read_ok &&
-        !setup_has_nptfs_signature(sector) &&
-        setup_sector_is_zero(sector) &&
+        !nptfs_found &&
         overwrite_check == 1 &&
-        info->addressable_sectors >= 320U) {
+        info->sector_count >= 320U) {
 
         char key;
 
@@ -624,23 +629,24 @@ static void setup_inspect_selected_disk(
 
 static void setup_select_disk(void)
 {
-    ata_device_info_t devices[ATA_MAX_DEVICES];
-    uint32_t i;
-    uint32_t found;
-
     for (;;) {
+        storage_device_info_t devices[STORAGE_IDE_DEVICE_COUNT +
+            128U];
+        uint32_t total;
+        uint32_t found = 0;
+        uint32_t i;
         char key;
-        int selected;
+        int selected = -1;
 
         terminal_clear();
         terminal_writeline("NPT-DOS SETUP: SELECT TARGET");
         terminal_writeline("----------------------------");
         terminal_writeline("");
-        terminal_writeline("Detecting legacy IDE ATA devices...");
+        terminal_writeline("Detecting supported IDE and SATA disks...");
         terminal_writeline("");
 
-        if (!ata_initialize()) {
-            terminal_writeline("No supported ATA disks were detected.");
+        if (!storage_initialize()) {
+            terminal_writeline("No supported storage disks were detected.");
             terminal_writeline("");
             terminal_writeline("No disk writes were performed.");
             terminal_writeline("Press any key to return to setup.");
@@ -648,66 +654,97 @@ static void setup_select_disk(void)
             return;
         }
 
-        found = 0;
+        total = storage_device_count();
 
-        for (i = 0; i < ATA_MAX_DEVICES; i++) {
-            if (ata_get_device_info_at(i, &devices[i])) {
-                found++;
-                terminal_write("  ");
-                setup_print_u32(i + 1U);
-                terminal_write(". ");
-                terminal_writeline(setup_device_name(i));
+        for (i = 0; i < total &&
+                    found < (uint32_t)(sizeof(devices) /
+                                       sizeof(devices[0])); ++i) {
+            storage_device_info_t info;
 
-                terminal_write("     Model: ");
-                terminal_writeline(
-                    devices[i].model[0] != '\0'
-                        ? devices[i].model
-                        : "(not reported)");
-
-                terminal_write("     Addressable sectors: ");
-                setup_print_u32(devices[i].addressable_sectors);
-                terminal_writeline("");
+            if (!storage_get_device_info_at(i, &info)) {
+                continue;
             }
+
+            devices[found] = info;
+
+            terminal_write("  ");
+            setup_print_u32(found + 1U);
+            terminal_write(". ");
+            terminal_write(setup_device_name(info.id));
+            terminal_writeline("");
+
+            terminal_write("     Model: ");
+            terminal_writeline(
+                info.model[0] != '\0'
+                    ? info.model
+                    : "(not reported)");
+
+            terminal_write("     Addressable sectors: ");
+            setup_print_u32((uint32_t)info.sector_count);
+            terminal_writeline("");
+
+            terminal_write("     Storage ID: ");
+            setup_print_u32(info.id);
+            terminal_writeline("");
+            terminal_writeline("");
+
+            ++found;
         }
 
         if (found == 0U) {
-            terminal_writeline("No usable ATA disks were detected.");
+            terminal_writeline("No usable storage disks were detected.");
             terminal_writeline("Press any key to return to setup.");
             setup_wait_for_key();
             return;
         }
 
-        terminal_writeline("");
-        terminal_writeline("Select a disk by its number.");
+        terminal_writeline("Select a disk by its displayed number.");
         terminal_writeline("Press R to rescan devices.");
         terminal_writeline("Press Q to return to the main setup menu.");
 
         key = keyboard_getchar();
 
-        if (key == 'q' || key == 'Q')
+        if (key == 'q' || key == 'Q') {
             return;
+        }
 
-        if (key == 'r' || key == 'R')
-            continue;
-
-        if (key < '1' || key > '4')
-            continue;
-
-        selected = (int)(key - '1');
-
-        if (!ata_get_device_info_at(
-                (uint32_t)selected, &devices[selected])) {
-            terminal_writeline("");
-            terminal_writeline("That device is no longer available.");
-            setup_wait_for_key();
+        if (key == 'r' || key == 'R') {
             continue;
         }
 
-        setup_inspect_selected_disk(
-            (uint32_t)selected, &devices[selected]);
+        if (key < '1' || key > '9') {
+            continue;
+        }
+
+        selected = (int)(key - '1');
+
+        if ((uint32_t)selected >= found) {
+            continue;
+        }
+
+        /*
+         * Refresh the selected device by its stable storage ID.
+         * Do not treat the displayed list position as the device ID.
+         */
+        {
+            storage_device_info_t current;
+            uint32_t device_id = devices[selected].id;
+
+            if (!storage_get_device_info_at(
+                    (uint32_t)selected, &current) ||
+                current.id != device_id) {
+                terminal_writeline("");
+                terminal_writeline(
+                    "Device list changed; rescan before continuing.");
+                setup_wait_for_key();
+                continue;
+            }
+
+            setup_inspect_selected_disk(
+                current.id, &current);
+        }
     }
 }
-
 
 int setup_run(void)
 {
