@@ -1398,6 +1398,12 @@ void kernel_main(void)
     pci_initialize();
     ahci_initialize();
 
+    /*
+     * Initialize the shared IDE and SATA/AHCI storage layer
+     * before Setup or filesystem operations need it.
+     */
+    (void)storage_initialize();
+
     #ifndef NPT_INSTALLED_BUILD
         if (!setup_run()) {
             for (;;) {
