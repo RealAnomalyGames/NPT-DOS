@@ -22,10 +22,22 @@
 
 static uint32_t pci_ahci_count;
 
+static pci_ahci_controller_t
+    pci_ahci_controllers[PCI_MAX_AHCI_CONTROLLERS];
+
 static inline void pci_outl(uint16_t port, uint32_t value)
 {
     __asm__ volatile (
         "outl %0, %1"
+        :
+        : "a"(value), "Nd"(port)
+    );
+}
+
+static inline void pci_outw(uint16_t port, uint16_t value)
+{
+    __asm__ volatile (
+        "outw %0, %1"
         :
         : "a"(value), "Nd"(port)
     );
@@ -44,22 +56,53 @@ static inline uint32_t pci_inl(uint16_t port)
     return value;
 }
 
-static uint32_t pci_read32(uint8_t bus,
+uint32_t pci_read_config32(uint8_t bus,
                            uint8_t device,
                            uint8_t function,
                            uint8_t offset)
 {
-    uint32_t address;
+    uint32_t address = 0x80000000u
+                     | ((uint32_t)bus << 16)
+                     | ((uint32_t)device << 11)
+                     | ((uint32_t)function << 8)
+                     | ((uint32_t)offset & 0xFCu);
 
-    address = 0x80000000u
-            | ((uint32_t)bus << 16)
-            | ((uint32_t)device << 11)
-            | ((uint32_t)function << 8)
-            | ((uint32_t)offset & 0xFCu);
+    pci_outl(PCI_CONFIG_ADDRESS, address);
+    return pci_inl(PCI_CONFIG_DATA);
+}
+
+uint16_t pci_read_config16(uint8_t bus,
+                           uint8_t device,
+                           uint8_t function,
+                           uint8_t offset)
+{
+    uint32_t value = pci_read_config32(
+        bus, device, function, offset
+    );
+
+    return (uint16_t)(
+        value >> ((offset & 2u) * 8u)
+    );
+}
+
+void pci_write_config16(uint8_t bus,
+                        uint8_t device,
+                        uint8_t function,
+                        uint8_t offset,
+                        uint16_t value)
+{
+    uint32_t address = 0x80000000u
+                     | ((uint32_t)bus << 16)
+                     | ((uint32_t)device << 11)
+                     | ((uint32_t)function << 8)
+                     | ((uint32_t)offset & 0xFCu);
 
     pci_outl(PCI_CONFIG_ADDRESS, address);
 
-    return pci_inl(PCI_CONFIG_DATA);
+    pci_outw(
+        (uint16_t)(PCI_CONFIG_DATA + (offset & 2u)),
+        value
+    );
 }
 
 static void pci_write_hex8(uint8_t value)
@@ -104,7 +147,7 @@ static void pci_scan_function(uint8_t bus,
         return;
     }
 
-    class_register = pci_read32(
+    class_register = pci_read_config32(
         bus, device, function, PCI_REG_CLASS
     );
 
@@ -124,9 +167,24 @@ static void pci_scan_function(uint8_t bus,
      * Read BAR5 only. Do not write BARs, enable bus mastering,
      * or access the controller's memory-mapped register space.
      */
-    bar5_register = pci_read32(
+    bar5_register = pci_read_config32(
         bus, device, function, PCI_REG_BAR5
     );
+
+    
+    if (pci_ahci_count <= PCI_MAX_AHCI_CONTROLLERS) {
+        uint32_t index = pci_ahci_count - 1u;
+
+        if (index < PCI_MAX_AHCI_CONTROLLERS) {
+            pci_ahci_controllers[index].bus = bus;
+            pci_ahci_controllers[index].device = device;
+            pci_ahci_controllers[index].function = function;
+            pci_ahci_controllers[index].vendor_id = vendor_id;
+            pci_ahci_controllers[index].device_id = device_id;
+            pci_ahci_controllers[index].bar5 = bar5_register;
+        }
+    }
+
 
     terminal_writeline("PCI AHCI controller detected");
 
@@ -182,7 +240,7 @@ void pci_initialize(void)
         bus = (uint8_t)bus_index;
 
         for (device = 0; device < 32; ++device) {
-            vendor_device = pci_read32(
+            vendor_device = pci_read_config32(
                 bus, device, 0, PCI_REG_VENDOR_DEVICE
             );
 
@@ -190,7 +248,7 @@ void pci_initialize(void)
                 continue;
             }
 
-            header_register = pci_read32(
+            header_register = pci_read_config32(
                 bus, device, 0, PCI_REG_HEADER_TYPE
             );
 
@@ -203,7 +261,7 @@ void pci_initialize(void)
             }
 
             for (function = 1; function < 8; ++function) {
-                vendor_device = pci_read32(
+                vendor_device = pci_read_config32(
                     bus, device, function,
                     PCI_REG_VENDOR_DEVICE
                 );
@@ -232,4 +290,30 @@ void pci_initialize(void)
     }
 
     terminal_writeline("PCI scan complete.");
+}
+
+uint32_t pci_ahci_controller_count(void)
+{
+    if (pci_ahci_count > PCI_MAX_AHCI_CONTROLLERS) {
+        return PCI_MAX_AHCI_CONTROLLERS;
+    }
+
+    return pci_ahci_count;
+}
+
+int pci_get_ahci_controller(
+    uint32_t index,
+    pci_ahci_controller_t *controller
+)
+{
+    if (controller == 0) {
+        return 0;
+    }
+
+    if (index >= pci_ahci_controller_count()) {
+        return 0;
+    }
+
+    *controller = pci_ahci_controllers[index];
+    return 1;
 }
