@@ -22,7 +22,7 @@ Version 1.0 marks the first official release of NPT-DOS.
 * Bootable installation media — start the installer using the official NPT-DOS ISO.
 * Publicly available source code — inspect the source code under the terms of the NPT-DOS License Agreement.
 
-##Download
+## Download
 
 NPT-DOS is available free of charge through the following official distribution channels:
 
