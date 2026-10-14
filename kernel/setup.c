@@ -390,7 +390,7 @@ static void installer_install_target(
      * conservative, but does not prove the whole disk is empty.
      */
     for (lba = 1U; lba <= 18U; lba++) {
-        if (!ata_read_sector_at(device, lba, sector)) {
+        if (!storage_read_sector(device, lba, sector)) {
             terminal_writeline("SAFETY STOP: Cannot inspect LBA.");
             terminal_write("LBA: ");
             setup_print_u32(lba);
