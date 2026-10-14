@@ -673,7 +673,6 @@ static void command_diskid(void)
 
     if (!ata_get_device_info(&info)) {
         terminal_writeline("No identified primary-master ATA device.");
-        terminal_writeline("Check the VirtualBox storage controller.");
         return;
     }
 
