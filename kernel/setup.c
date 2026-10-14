@@ -3,6 +3,8 @@
 #include "terminal.h"
 #include "keyboard.h"
 #include "ata.h"
+#include "pci.h"
+#include "ahci.h"
 
 #include <stdint.h>
 
@@ -36,6 +38,146 @@ static void setup_print_u32(uint32_t value)
     terminal_write(&buffer[position]);
 }
 
+static void setup_inspect_sata_ports(void)
+{
+    uint32_t controller_index;
+    uint32_t controllers_found = ahci_controller_count();
+    uint32_t devices_found = 0;
+
+    terminal_writeline("");
+    terminal_writeline("NPT-DOS SATA / AHCI INSPECTION");
+    terminal_writeline("------------------------------");
+    terminal_writeline("Mode: READ-ONLY");
+    terminal_writeline("");
+
+    if (controllers_found == 0) {
+        terminal_writeline("No usable AHCI controller detected.");
+        terminal_writeline("");
+        terminal_writeline(
+            "This does not prove that no SATA disk is installed."
+        );
+        terminal_writeline(
+            "The controller may use IDE mode or an unsupported configuration."
+        );
+        return;
+    }
+
+    for (controller_index = 0;
+         controller_index < controllers_found;
+         controller_index++) {
+
+        ahci_controller_info_t controller;
+        uint32_t port_number;
+
+        if (!ahci_get_controller_info(
+                controller_index, &controller)) {
+            continue;
+        }
+
+        terminal_writeline("AHCI Controller");
+
+        terminal_write("  PCI location: ");
+        setup_print_u32(controller.bus);
+        terminal_write(":");
+        setup_print_u32(controller.device);
+        terminal_write(".");
+        setup_print_u32(controller.function);
+        terminal_writeline("");
+
+        terminal_write("  Vendor ID: ");
+        setup_print_u32(controller.vendor_id);
+        terminal_writeline("");
+
+        terminal_write("  Device ID: ");
+        setup_print_u32(controller.device_id);
+        terminal_writeline("");
+
+        terminal_write("  AHCI version register: ");
+        setup_print_u32(controller.version);
+        terminal_writeline("");
+
+        for (port_number = 0;
+             port_number < AHCI_MAX_PORTS;
+             port_number++) {
+
+            ahci_port_info_t port;
+
+            if (!ahci_get_port_info(
+                    controller_index, port_number, &port)) {
+                continue;
+            }
+
+            if (!port.detected || port.device_type == 0) {
+                continue;
+            }
+
+            devices_found++;
+
+            terminal_write("  Port ");
+            setup_print_u32(port.port_number);
+            terminal_write(": ");
+
+            switch (port.device_type) {
+                case 1:
+                    terminal_writeline(
+                        "SATA ATA device (signature detected)"
+                    );
+                    break;
+
+                case 2:
+                    terminal_writeline(
+                        "SATA ATAPI device (signature detected)"
+                    );
+                    break;
+
+                case 3:
+                    terminal_writeline(
+                        "Enclosure management bridge"
+                    );
+                    break;
+
+                case 4:
+                    terminal_writeline(
+                        "Port multiplier"
+                    );
+                    break;
+
+                default:
+                    terminal_writeline(
+                        "Other AHCI port device"
+                    );
+                    break;
+            }
+
+            terminal_write("    SATA status: ");
+            setup_print_u32(port.sata_status);
+            terminal_writeline("");
+
+            terminal_write("    Signature: ");
+            setup_print_u32(port.sata_signature);
+            terminal_writeline("");
+
+            terminal_write("    Task-file status: ");
+            setup_print_u32(port.task_file_data);
+            terminal_writeline("");
+        }
+
+        terminal_writeline("");
+    }
+
+    terminal_write("Detected device/port entries: ");
+    setup_print_u32(devices_found);
+    terminal_writeline("");
+
+    terminal_writeline("");
+    terminal_writeline(
+        "No disk sectors were read or written."
+    );
+    terminal_writeline(
+        "Model and capacity identification are not implemented yet."
+    );
+}
+
 static void setup_wait_for_key(void)
 {
     (void)keyboard_getchar();
@@ -56,20 +198,25 @@ static void setup_draw_screen(void)
     terminal_writeline("");
     terminal_writeline("+----------------------------------------------+");
     terminal_writeline("| 1. INSTALL TO HARD DISK                      |");
-    terminal_writeline("|                                              |");
     terminal_writeline("|    Inspect and select a supported IDE disk.  |");
     terminal_writeline("|    Installation requires explicit approval.  |");
     terminal_writeline("+----------------------------------------------+");
     terminal_writeline("");
     terminal_writeline("+----------------------------------------------+");
     terminal_writeline("| 2. PORTABLE MODE                             |");
-    terminal_writeline("|                                              |");
     terminal_writeline("|    Continue booting from the current media.  |");
     terminal_writeline("|    No installer disk writes are performed.   |");
     terminal_writeline("+----------------------------------------------+");
     terminal_writeline("");
-    terminal_writeline("Press 1 or 2 to select an option.");
+    terminal_writeline("+----------------------------------------------+");
+    terminal_writeline("| 3. INSPECT SATA / AHCI DEVICES               |");
+    terminal_writeline("|    Read-only controller and port inspection. |");
+    terminal_writeline("|    Does not install or write to disks.       |");
+    terminal_writeline("+----------------------------------------------+");
+    terminal_writeline("");
+    terminal_writeline("Press 1, 2, or 3 to select an option.");
     terminal_writeline("Press Q to exit setup.");
+
 }
 
 static int setup_has_nptfs_signature(const uint8_t *sector)
@@ -567,6 +714,7 @@ static void setup_select_disk(void)
     }
 }
 
+
 int setup_run(void)
 {
     for (;;) {
@@ -586,6 +734,13 @@ int setup_run(void)
             terminal_writeline("Continuing NPT-DOS startup...");
             terminal_writeline("");
             return 1;
+        } else if (key == '3') {
+            terminal_clear();
+            setup_inspect_sata_ports();
+
+            terminal_writeline("");
+            terminal_writeline("Press any key to return to setup.");
+            setup_wait_for_key();
         } else if (key == 'q' || key == 'Q') {
             terminal_clear();
             terminal_writeline("NPT-DOS Setup exited.");
