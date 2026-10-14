@@ -71,6 +71,18 @@ int ahci_read_sector(
     uint8_t *buffer
 );
 
+int ahci_write_sector(
+    uint32_t controller,
+    uint32_t port,
+    uint64_t lba,
+    const uint8_t *buffer
+);
+
+int ahci_flush_cache(
+    uint32_t controller,
+    uint32_t port
+);
+
 /*
  * Sector writes will be exposed only after DMA reads, controller
  * initialization, and read-back verification have been validated.
