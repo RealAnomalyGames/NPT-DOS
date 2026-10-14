@@ -259,7 +259,7 @@ static int setup_sector_is_zero(const uint8_t *sector)
  */
 static int setup_check_planned_write_sectors(
     uint32_t device,
-    uint32_t sectors)
+    uint64_t sectors)
 {
     uint8_t sector[ATA_SECTOR_SIZE];
     uint32_t lba;
@@ -267,14 +267,14 @@ static int setup_check_planned_write_sectors(
     if (sectors < 320U)
         return -1;
 
-    if (!ata_read_sector_at(device, 0U, sector))
+    if (!storage_read_sector(device, 0U, sector))
         return -1;
 
     if (!setup_sector_is_zero(sector))
         return 0;
 
     for (lba = 32U; lba <= 47U; lba++) {
-        if (!ata_read_sector_at(device, lba, sector))
+        if (!storage_read_sector(device, lba, sector))
             return -1;
 
         if (!setup_sector_is_zero(sector))
@@ -282,7 +282,7 @@ static int setup_check_planned_write_sectors(
     }
 
     for (lba = 64U; lba <= 319U; lba++) {
-        if (!ata_read_sector_at(device, lba, sector))
+        if (!storage_read_sector(device, lba, sector))
             return -1;
 
         if (!setup_sector_is_zero(sector))
@@ -325,7 +325,7 @@ static int installer_write_verified_sector(
 {
     uint8_t verify[ATA_SECTOR_SIZE];
 
-    if (!ata_write_sector_at(device, lba, data)) {
+    if (!storage_write_sector(device, lba, data)) {
         terminal_write("WRITE FAILED at LBA ");
         setup_print_u32(lba);
         terminal_writeline("");
@@ -374,7 +374,7 @@ static void installer_install_target(
     }
 
     /* Recheck the selected target immediately before writing. */
-    if (!ata_read_sector_at(device, 1U, sector)) {
+    if (!storage_read_sector(device, 1U, sector)) {
         terminal_writeline("SAFETY STOP: Cannot read LBA 1.");
         goto failed;
     }
