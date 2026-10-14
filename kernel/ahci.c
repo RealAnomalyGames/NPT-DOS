@@ -181,15 +181,6 @@ int ahci_initialize(void)
 
     found = pci_ahci_controller_count();
 
-    uint16_t pci_command;
-
-    pci_command = pci_read_config16(
-        pci_info.bus,
-        pci_info.device,
-        pci_info.function,
-        PCI_REG_COMMAND
-    );
-
     terminal_writeline("AHCI: inspecting SATA controllers...");
 
     for (i = 0; i < found &&
