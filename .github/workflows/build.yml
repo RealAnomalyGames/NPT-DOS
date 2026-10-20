@@ -2,10 +2,6 @@
 name: NPT-DOS 1.01
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
